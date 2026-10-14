@@ -1,0 +1,1181 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>StockSense — Know Your Stock</title>
+    <style>
+        :root {
+            --bg: #0b0a10;
+            --panel: #15121d;
+            --panel2: #1d1828;
+            --line: #30283d;
+            --purple: #8b5cf6;
+            --lav: #b9a0ff;
+            --green: #31d69a;
+            --orange: #ff9f43;
+            --red: #ff7188;
+            --text: #f6f2ff;
+            --muted: #a69bb8
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            margin: 0;
+            background: radial-gradient(ellipse at 15% 0, #251642, transparent 35%), var(--bg);
+            color: var(--text);
+            font: 14px/1.5 Inter, system-ui, -apple-system, Segoe UI, sans-serif
+        }
+
+        button,
+        input,
+        select {
+            font: inherit
+        }
+
+        button {
+            cursor: pointer
+        }
+
+        .app {
+            display: grid;
+            grid-template-columns: 235px 1fr;
+            min-height: 100vh
+        }
+
+        .side {
+            background: #100e16;
+            border-right: 1px solid var(--line);
+            padding: 24px 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 30px
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 7px
+        }
+
+        .logo {
+            width: 42px;
+            height: 42px;
+            border-radius: 14px;
+            background: linear-gradient(140deg, var(--purple), #5527a6);
+            display: grid;
+            place-items: center;
+            font-size: 23px;
+            font-weight: 900
+        }
+
+        .brand b {
+            font-size: 18px
+        }
+
+        .brand b span {
+            color: var(--green)
+        }
+
+        .brand small {
+            display: block;
+            color: var(--muted);
+            font-size: 10px;
+            letter-spacing: 1.2px;
+            text-transform: uppercase
+        }
+
+        .label {
+            font-size: 10px;
+            color: #776c89;
+            letter-spacing: 1.5px;
+            font-weight: 800;
+            padding: 0 12px;
+            margin-bottom: 9px
+        }
+
+        .nav {
+            display: grid;
+            gap: 6px
+        }
+
+        .nav button {
+            border: 0;
+            background: transparent;
+            color: var(--muted);
+            padding: 12px;
+            border-radius: 11px;
+            text-align: left;
+            font-weight: 650
+        }
+
+        .nav button:hover,
+        .nav button.active {
+            background: #2a2040;
+            color: white
+        }
+
+        .nav button.active {
+            box-shadow: inset 3px 0 var(--purple)
+        }
+
+        .nav button span {
+            display: inline-block;
+            width: 26px;
+            color: var(--lav)
+        }
+
+        .tip {
+            margin-top: auto;
+            border: 1px solid #493264;
+            background: linear-gradient(140deg, #28193d, #17121f);
+            border-radius: 15px;
+            padding: 15px
+        }
+
+        .tip p {
+            color: var(--muted);
+            font-size: 12px
+        }
+
+        .tip a {
+            color: var(--green);
+            cursor: pointer;
+            font-weight: 700
+        }
+
+        main {
+            padding: 27px clamp(15px, 3vw, 38px);
+            min-width: 0
+        }
+
+        .top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 26px
+        }
+
+        .eyebrow {
+            font-size: 10px;
+            letter-spacing: 1.6px;
+            color: var(--lav);
+            font-weight: 800;
+            text-transform: uppercase
+        }
+
+        .h1 {
+            font-size: clamp(24px, 3vw, 32px);
+            font-weight: 850;
+            letter-spacing: -1px;
+            margin: 4px 0
+        }
+
+        .muted {
+            color: var(--muted);
+            margin: 0
+        }
+
+        .btn {
+            border: 0;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-weight: 750
+        }
+
+        .primary {
+            background: var(--purple);
+            color: white
+        }
+
+        .secondary {
+            background: #262130;
+            border: 1px solid var(--line);
+            color: var(--text)
+        }
+
+        .greenbtn {
+            background: var(--green);
+            color: #06281c
+        }
+
+        .welcome {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 22px 24px;
+            border: 1px solid #493264;
+            border-radius: 18px;
+            background: linear-gradient(110deg, #2a1b44, #18131f);
+            margin-bottom: 18px
+        }
+
+        .welcome h2 {
+            margin: 3px 0 6px;
+            font-size: 21px
+        }
+
+        .welcome p {
+            margin: 0;
+            color: #c4b8d3;
+            max-width: 640px
+        }
+
+        .spark {
+            font-size: 43px;
+            color: var(--lav)
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 13px;
+            margin-bottom: 18px
+        }
+
+        .metric,
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: linear-gradient(145deg, #181520, #121018);
+            padding: 17px;
+            min-width: 0
+        }
+
+        .metric-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--muted);
+            font-size: 12px
+        }
+
+        .mi {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            display: grid;
+            place-items: center;
+            background: #392652;
+            color: var(--lav);
+            font-weight: 900
+        }
+
+        .mi.g {
+            background: #123a2c;
+            color: var(--green)
+        }
+
+        .mi.o {
+            background: #472b17;
+            color: var(--orange)
+        }
+
+        .mi.r {
+            background: #421e2c;
+            color: var(--red)
+        }
+
+        .value {
+            font-size: 26px;
+            font-weight: 850;
+            letter-spacing: -.7px;
+            margin: 10px 0 0
+        }
+
+        .foot {
+            font-size: 11px;
+            color: var(--muted)
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr;
+            gap: 16px;
+            margin-bottom: 17px
+        }
+
+        .panel h3 {
+            font-size: 15px;
+            margin: 0
+        }
+
+        .sub {
+            font-size: 11px;
+            color: var(--muted);
+            margin: 3px 0 15px
+        }
+
+        .panel-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            gap: 10px
+        }
+
+        .list {
+            display: grid;
+            gap: 9px
+        }
+
+        .item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: #1d1827;
+            border: 1px solid #2b2436;
+            border-radius: 11px
+        }
+
+        .emoji {
+            width: 35px;
+            height: 35px;
+            display: grid;
+            place-items: center;
+            border-radius: 10px;
+            background: #30223f;
+            font-size: 17px;
+            flex-shrink: 0
+        }
+
+        .item-main {
+            flex: 1;
+            min-width: 0
+        }
+
+        .item-main b {
+            font-size: 12px;
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis
+        }
+
+        .item-main small {
+            color: var(--muted);
+            font-size: 10px
+        }
+
+        .qty {
+            font-weight: 800;
+            color: var(--orange);
+            font-size: 12px;
+            white-space: nowrap
+        }
+
+        .chart {
+            height: 155px;
+            display: flex;
+            align-items: flex-end;
+            gap: 12px;
+            padding-top: 12px;
+            background: repeating-linear-gradient(to bottom, transparent 0, transparent 37px, #ffffff08 38px, #ffffff08 39px)
+        }
+
+        .col {
+            height: 100%;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 7px
+        }
+
+        .bars {
+            height: calc(100% - 20px);
+            display: flex;
+            align-items: flex-end;
+            gap: 4px;
+            width: 100%;
+            justify-content: center
+        }
+
+        .bar {
+            width: 27%;
+            max-width: 20px;
+            background: linear-gradient(var(--lav), #6634b5);
+            border-radius: 4px 4px 0 0;
+            min-height: 3px
+        }
+
+        .bar.alt {
+            background: linear-gradient(var(--green), #147a58)
+        }
+
+        .day {
+            font-size: 10px;
+            color: var(--muted)
+        }
+
+        .page {
+            display: none
+        }
+
+        .page.active {
+            display: block
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 14px 0
+        }
+
+        .field,
+        select {
+            background: #100e16;
+            color: var(--text);
+            border: 1px solid var(--line);
+            border-radius: 9px;
+            padding: 10px 11px;
+            min-width: 0
+        }
+
+        .search {
+            flex: 1;
+            min-width: 170px
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            white-space: nowrap
+        }
+
+        th {
+            text-align: left;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #9589a8;
+            background: #1b1724;
+            padding: 12px
+        }
+
+        td {
+            padding: 12px;
+            border-top: 1px solid #2a2434;
+            font-size: 12px
+        }
+
+        th:first-child,
+        td:first-child {
+            padding-left: 14px
+        }
+
+        .tablewrap {
+            overflow: auto;
+            border-radius: 10px
+        }
+
+        .status {
+            display: inline-block;
+            border-radius: 20px;
+            padding: 4px 8px;
+            font-size: 10px;
+            font-weight: 800
+        }
+
+        .ok {
+            color: var(--green);
+            background: #123a2c
+        }
+
+        .low {
+            color: var(--orange);
+            background: #422a18
+        }
+
+        .out {
+            color: var(--red);
+            background: #421e2c
+        }
+
+        .smallbtn {
+            border: 1px solid var(--line);
+            background: #262130;
+            color: white;
+            border-radius: 7px;
+            padding: 5px 7px;
+            font-size: 11px;
+            margin-right: 3px
+        }
+
+        .advisor {
+            padding: 17px;
+            border: 1px solid #493264;
+            border-radius: 14px;
+            background: linear-gradient(130deg, #291b40, #17131e)
+        }
+
+        .advisor p {
+            color: #c4b8d3;
+            font-size: 12px
+        }
+
+        .budgetrow {
+            display: flex;
+            gap: 8px
+        }
+
+        .budgetrow input {
+            flex: 1;
+            width: 100%
+        }
+
+        .rec {
+            padding: 13px 0;
+            border-bottom: 1px solid var(--line)
+        }
+
+        .rec:last-child {
+            border-bottom: 0
+        }
+
+        .rec b {
+            font-size: 12px
+        }
+
+        .rec small {
+            display: block;
+            color: var(--muted);
+            margin: 5px 0;
+            font-size: 11px
+        }
+
+        .rec strong {
+            color: var(--green)
+        }
+
+        .empty {
+            padding: 22px;
+            text-align: center;
+            color: var(--muted);
+            border: 1px dashed var(--line);
+            border-radius: 10px
+        }
+
+        .notice {
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 12px
+        }
+
+        .modalbg {
+            position: fixed;
+            inset: 0;
+            background: #050409cc;
+            display: grid;
+            place-items: center;
+            padding: 15px;
+            z-index: 5
+        }
+
+        .modal {
+            width: min(510px, 100%);
+            background: #181520;
+            border: 1px solid #493264;
+            border-radius: 18px;
+            padding: 22px;
+            max-height: 92vh;
+            overflow: auto
+        }
+
+        .modal h2 {
+            margin: 0 0 5px
+        }
+
+        .modal p {
+            color: var(--muted);
+            font-size: 12px;
+            margin: 0 0 18px
+        }
+
+        .formgrid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px
+        }
+
+        .fg {
+            display: grid;
+            gap: 5px
+        }
+
+        .fg label {
+            font-size: 11px;
+            color: #c1b5d0
+        }
+
+        .fg input {
+            width: 100%
+        }
+
+        .full {
+            grid-column: 1/-1
+        }
+
+        .actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 20px
+        }
+
+        .toast {
+            position: fixed;
+            right: 18px;
+            bottom: 18px;
+            background: #153d2e;
+            border: 1px solid #318767;
+            color: #b1ffda;
+            padding: 13px 17px;
+            border-radius: 11px;
+            z-index: 9
+        }
+
+        .toast.error {
+            background: #421e2c;
+            color: #ffb6c2
+        }
+
+        .hide {
+            display: none !important
+        }
+
+        .footnote {
+            text-align: center;
+            color: #6f667d;
+            font-size: 10px;
+            margin: 24px 0 0
+        }
+
+        @media(max-width:1050px) {
+            .metrics {
+                grid-template-columns: repeat(2, 1fr)
+            }
+
+            .grid {
+                grid-template-columns: 1fr
+            }
+        }
+
+        @media(max-width:700px) {
+            .app {
+                display: block
+            }
+
+            .side {
+                position: fixed;
+                z-index: 6;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                width: 245px;
+                transform: translateX(-110%);
+                transition: .2s;
+                box-shadow: 20px 0 50px #0009
+            }
+
+            .side.open {
+                transform: translateX(0)
+            }
+
+            main {
+                padding: 18px 12px
+            }
+
+            .welcome {
+                padding: 17px
+            }
+
+            .spark {
+                display: none
+            }
+
+            .top {
+                align-items: flex-start
+            }
+
+            .metrics {
+                gap: 9px
+            }
+
+            .metric {
+                padding: 13px
+            }
+
+            .value {
+                font-size: 22px
+            }
+
+            .grid {
+                gap: 12px
+            }
+
+            .formgrid {
+                grid-template-columns: 1fr
+            }
+
+            .full {
+                grid-column: auto
+            }
+
+            .mobile {
+                display: inline-block !important
+            }
+
+            .top .btn {
+                padding: 9px
+            }
+
+            .top .desktop {
+                display: none
+            }
+        }
+
+        .mobile {
+            display: none
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="auth-screen"
+        style="display:none;min-height:100vh;background:#0b0a10;color:#f6f2ff;align-items:center;justify-content:center;padding:24px;font-family:Arial,sans-serif">
+        <form id="auth-form"
+            style="width:100%;max-width:400px;background:#181520;border:1px solid #493264;border-radius:18px;padding:28px">
+            <div style="font-size:28px;font-weight:800;margin-bottom:6px">Stock<span style="color:#31d69a">Sense</span>
+            </div>
+            <p style="color:#a69bb8;margin-bottom:24px">Sign in to manage your inventory.</p>
+            <label for="auth-email">Email address</label>
+            <input id="auth-email" type="email" required autocomplete="email"
+                style="display:block;width:100%;box-sizing:border-box;margin:8px 0 16px;padding:12px;border-radius:9px;background:#100e16;color:white;border:1px solid #493264">
+            <label for="auth-password">Password</label>
+            <input id="auth-password" type="password" required autocomplete="current-password"
+                style="display:block;width:100%;box-sizing:border-box;margin:8px 0 16px;padding:12px;border-radius:9px;background:#100e16;color:white;border:1px solid #493264">
+            <button type="submit"
+                style="width:100%;padding:12px;border:0;border-radius:9px;background:#8b5cf6;color:white;font-weight:bold">Sign
+                in</button>
+            <p id="auth-message" role="status" style="color:#ff9f43;margin-bottom:0"></p>
+        </form>
+    </div>
+
+    <div class="app">
+        <aside class="side" id="sidebar">
+            <div class="brand">
+                <div class="logo">S</div>
+                <div><b>Stock<span style="color:var(--green)">Sense</span></b><small>Inventory intelligence</small>
+                </div>
+            </div>
+            <div>
+                <div class="label">Workspace</div>
+                <nav class="nav">
+                    <button class="active" data-page="dashboard"><span>◫</span>Dashboard</button><button
+                        data-page="inventory"><span>▦</span>Inventory <small id="count"
+                            style="float:right"></small></button><button data-page="movements"><span>↔</span>Stock
+                        movements</button><button data-page="advisor"><span>✧</span>StockSense Adviser</button><button
+                        data-page="reports"><span>▥</span>Reports & insights</button>
+                </nav>
+            </div>
+            <div class="tip"><b>Make smarter moves ✦</b>
+                <p>Use your stock data to decide what deserves your next naira.</p><a data-go="advisor">Open Stock
+                    Adviser →</a>
+            </div><small style="color:#70657e;padding:5px">STOCKSENSE • DEMO EDITION</small>
+        </aside>
+        <main>
+            <header class="top">
+                <div><button class="btn secondary mobile" id="menu">☰</button>
+                    <div class="eyebrow">Your business at a glance</div>
+                    <h1 class="h1" id="title">Dashboard overview</h1>
+                    <p class="muted" id="subtitle">Know what you have. Know what needs attention.</p>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center"><span class="desktop muted"
+                        id="date"></span><button class="btn primary" id="add">＋ Add product</button></div>
+            </header>
+            <section class="page active" id="page-dashboard">
+                <div class="welcome">
+                    <div>
+                        <div class="eyebrow">Welcome to StockSense</div>
+                        <h2>Let's make every product count.</h2>
+                        <p>Catch shortages early, understand what's moving, and put your restocking budget where it
+                            matters.</p>
+                    </div>
+                    <div class="spark">✧</div>
+                </div>
+                <div class="metrics" id="metrics"></div>
+                <div class="grid">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Stock activity</h3>
+                                <p class="sub">Recorded sales and restocks over the last 7 days</p>
+                            </div>
+                        </div>
+                        <div class="chart" id="chart"></div>
+                        <div class="sub" style="margin:8px 0 0">Purple = sales · Green = restocks</div>
+                    </div>
+                    <div class="panel">
+                        <h3>Needs attention</h3>
+                        <p class="sub">Products that may need a restock</p>
+                        <div class="list" id="alerts"></div>
+                    </div>
+                </div>
+                <div class="grid">
+                    <div class="panel">
+                        <h3>Recent stock movements</h3>
+                        <p class="sub">A traceable record of what changed</p>
+                        <div class="list" id="recent"></div>
+                    </div>
+                    <div class="panel">
+                        <h3>StockSense Adviser ✧</h3>
+                        <p class="sub">A clearer next move for your stock</p>
+                        <div class="advisor"><b>Make your budget work harder.</b>
+                            <p>Get restocking priorities, quantities, costs and explanations based on your inventory.
+                            </p><button class="btn primary" data-go="advisor">Get recommendations →</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            <section class="page" id="page-inventory">
+                <div class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Product inventory</h3>
+                            <p class="sub">Manage products, prices and stock health.</p>
+                        </div><button class="btn primary" id="add2">＋ Add product</button>
+                    </div>
+                    <div class="toolbar"><input class="field search" id="search"
+                            placeholder="Search products or SKU…"><select id="filter">
+                            <option value="all">All statuses</option>
+                            <option value="ok">In stock</option>
+                            <option value="low">Low stock</option>
+                            <option value="out">Out of stock</option>
+                        </select></div>
+                    <div class="tablewrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Product</th>
+                                    <th>Category</th>
+                                    <th>Stock</th>
+                                    <th>Unit cost</th>
+                                    <th>Selling price</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="products"></tbody>
+                        </table>
+                    </div>
+                    <div class="empty hide" id="noProducts">No matching products found.</div>
+                </div>
+            </section>
+            <section class="page" id="page-movements">
+                <div class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Stock movement history</h3>
+                            <p class="sub">Every sale, restock and adjustment.</p>
+                        </div><button class="btn secondary" id="export">↓ Export CSV</button>
+                    </div>
+                    <div class="toolbar"><input class="field search" id="moveSearch"
+                            placeholder="Search product or note…"><select id="moveFilter">
+                            <option value="all">All movements</option>
+                            <option>Sale</option>
+                            <option>Restock</option>
+                            <option>Adjustment</option>
+                        </select></div>
+                    <div class="tablewrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Product</th>
+                                    <th>Type</th>
+                                    <th>Change</th>
+                                    <th>Stock after</th>
+                                    <th>Note</th>
+                                </tr>
+                            </thead>
+                            <tbody id="moves"></tbody>
+                        </table>
+                    </div>
+                    <div class="empty hide" id="noMoves">No matching stock movements.</div>
+                </div>
+            </section>
+            <section class="page" id="page-advisor">
+                <div class="welcome">
+                    <div>
+                        <div class="eyebrow">Decision support</div>
+                        <h2>Your next restock, made clearer.</h2>
+                        <p>Recommendations use actual inventory data and transparent rules — not invented forecasts.</p>
+                    </div>
+                    <div class="spark">✧</div>
+                </div>
+                <div class="grid">
+                    <div class="panel">
+                        <h3>Build your restocking plan</h3>
+                        <p class="sub">Enter the amount available to spend.</p>
+                        <div class="advisor"><label for="budget"><b>Available budget (₦)</b></label>
+                            <div class="budgetrow" style="margin-top:10px"><input class="field" id="budget"
+                                    type="number" min="0" value="20000"><button class="btn primary" id="run">Find
+                                    priorities ✧</button></div>
+                            <p style="margin-bottom:0">Suggested quantities fit the budget and are ranked by urgency and
+                                recorded sales activity.</p>
+                        </div>
+                        <div id="recs"></div>
+                    </div>
+                    <div class="panel">
+                        <h3>How priorities are calculated</h3>
+                        <p class="sub">Transparent rules you can understand.</p>
+                        <div class="list">
+                            <div class="item">
+                                <div class="mi o">!</div>
+                                <div class="item-main"><b>Stock urgency</b><small>Out-of-stock and low-stock items rank
+                                        higher.</small></div>
+                            </div>
+                            <div class="item">
+                                <div class="mi g">↗</div>
+                                <div class="item-main"><b>Recorded sales</b><small>Recent recorded sales can raise
+                                        priority.</small></div>
+                            </div>
+                            <div class="item">
+                                <div class="mi">₦</div>
+                                <div class="item-main"><b>Budget fit</b><small>Quantity suggestions respect unit costs
+                                        and budget.</small></div>
+                            </div>
+                        </div>
+                        <p class="notice">This is a rule-based MVP, not a demand prediction system. Accuracy depends on
+                            your records.</p>
+                    </div>
+                </div>
+            </section>
+            <section class="page" id="page-reports">
+                <div class="metrics" id="reportsMetrics"></div>
+                <div class="grid">
+                    <div class="panel">
+                        <h3>Top recorded sales</h3>
+                        <p class="sub">Units sold in recorded movements</p>
+                        <div class="list" id="top"></div>
+                    </div>
+                    <div class="panel">
+                        <h3>Stock health</h3>
+                        <p class="sub">Current status across your products</p>
+                        <div class="list" id="health"></div>
+                    </div>
+                </div>
+                <p class="notice">Inventory value is current quantity × unit purchase cost. Recorded sales quantities
+                    are not the same as profit or verified revenue.</p>
+            </section>
+            <p class="footnote">STOCKSENSE • KNOW YOUR STOCK. MAKE SMARTER MOVES. <span
+                    style="color:var(--lav)">◆</span> Inventory is saved to your Supabase account.</p>
+        </main>
+    </div>
+    <div id="modal"></div>
+    <div id="toast"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./supabase-config.js"></script>
+
+    <script>
+        const KEY = 'stocksense-v1';
+
+        const supabaseClient = window.supabase.createClient(
+            window.SUPABASE_URL,
+            window.SUPABASE_PUBLISHABLE_KEY
+        );
+
+        const seed = [
+            { id: '1', name: 'USB-C Fast Charger', sku: 'ACC-001', category: 'Chargers', cost: 1500, price: 3000, qty: 3, min: 10, emoji: '🔌' },
+            { id: '2', name: '20,000mAh Power Bank', sku: 'PWR-002', category: 'Power banks', cost: 8500, price: 12000, qty: 8, min: 5, emoji: '🔋' },
+            { id: '3', name: 'Bluetooth Earbuds', sku: 'AUD-003', category: 'Audio', cost: 6500, price: 9500, qty: 2, min: 6, emoji: '🎧' },
+            { id: '4', name: 'Braided USB Cable', sku: 'ACC-004', category: 'Cables', cost: 900, price: 1800, qty: 24, min: 8, emoji: '〰️' },
+            { id: '5', name: 'Mini Bluetooth Speaker', sku: 'AUD-005', category: 'Audio', cost: 7000, price: 10500, qty: 0, min: 4, emoji: '🔊' },
+            { id: '6', name: 'Clear Phone Case', sku: 'PHN-006', category: 'Phone accessories', cost: 1200, price: 2500, qty: 18, min: 6, emoji: '📱' },
+            { id: '7', name: '20W Wall Adapter', sku: 'ACC-007', category: 'Chargers', cost: 2800, price: 4500, qty: 7, min: 8, emoji: '⚡' },
+            { id: '8', name: 'Wireless Mouse', sku: 'CMP-008', category: 'Computer accessories', cost: 4000, price: 6500, qty: 11, min: 4, emoji: '🖱️' }];
+        function ago(n) { let d = new Date(); d.setDate(d.getDate() - n); d.setHours(12, 0, 0, 0); return d.toISOString() }
+        const seedMoves = [['1', 'Sale', 2, 5, 3, 0, 'Counter sale'], ['3', 'Sale', 2, 4, 2, 0, 'Customer purchase'], ['5', 'Sale', 1, 1, 0, 1, 'Last unit sold'], ['4', 'Restock', 12, 12, 24, 1, 'Supplier delivery'], ['7', 'Sale', 3, 10, 7, 2, 'Counter sale'], ['2', 'Restock', 5, 3, 8, 3, 'Weekly restock'], ['6', 'Sale', 4, 22, 18, 4, 'Customer purchase'], ['1', 'Sale', 1, 6, 5, 5, 'Counter sale'], ['3', 'Restock', 4, 0, 4, 6, 'Supplier delivery']].map((x, i) => ({ id: 'm' + i, pid: x[0], type: x[1], qty: x[2], before: x[3], after: x[4], date: ago(x[5]), note: x[6] }));
+        let data; try { data = JSON.parse(localStorage.getItem(KEY)) } catch (e) { } if (!data || !Array.isArray(data.products) || !Array.isArray(data.moves)) data = { products: seed.map(x => ({ ...x })), moves: seedMoves };
+        let currentUser = null, dbReady = false, syncChain = Promise.resolve();
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        const $ = id => document.getElementById(id), cash = n => '₦' + Number(n || 0).toLocaleString('en-NG', { maximumFractionDigits: 2 }), fmt = n => Number(n || 0).toLocaleString('en-NG'), esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])), prod = id => data.products.find(p => p.id === id), st = p => p.qty <= 0 ? 'out' : p.qty <= p.min ? 'low' : 'ok', status = s => s === 'ok' ? 'In stock' : s === 'low' ? 'Low stock' : 'Out of stock', datefmt = d => new Date(d).toLocaleString('en-NG', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+        function save() {
+            try { localStorage.setItem(KEY, JSON.stringify(data)) } catch (e) { notify('Could not save a local backup.', 'error') }
+            if (dbReady && currentUser) {
+                syncChain = syncChain.then(syncDataToSupabase).catch(error => {
+                    console.error('StockSense Supabase save failed:', error);
+                    notify('Database save failed: ' + (error.message || 'please check your connection'), 'error');
+                });
+            }
+        }
+        function throwIfError(result) { if (result.error) throw result.error; return result.data; }
+        function productToRow(p) {
+            const row = { user_id: currentUser.id, name: p.name, sku: p.sku || null,
+                category: p.category || 'Other', unit_cost: Number(p.cost) || 0,
+                selling_price: Number(p.price) || 0, quantity: Number(p.qty) || 0,
+                minimum_stock: Number(p.min) || 0, emoji: p.emoji || '📦' };
+            if (UUID_RE.test(String(p.id))) row.id = p.id;
+            return row;
+        }
+        function rowToProduct(p) {
+            return { id: p.id, name: p.name, sku: p.sku || '', category: p.category || 'Other',
+                cost: Number(p.unit_cost) || 0, price: Number(p.selling_price) || 0,
+                qty: Number(p.quantity) || 0, min: Number(p.minimum_stock) || 0, emoji: p.emoji || '📦' };
+        }
+        function rowToMove(m) {
+            return { id: m.id, pid: m.product_id, type: m.movement_type, qty: Number(m.quantity),
+                before: Number(m.quantity_before), after: Number(m.quantity_after), date: m.created_at, note: m.note || '' };
+        }
+        async function insertMovement(m) {
+            const result = await supabaseClient.from('stock_movements').insert({
+                user_id: currentUser.id, product_id: m.pid, movement_type: m.type,
+                quantity: Number(m.qty), quantity_before: Number(m.before), quantity_after: Number(m.after),
+                note: m.note || null, ...(m.date ? { created_at: m.date } : {})
+            }).select().single();
+            const saved = throwIfError(result); m.id = saved.id; m.date = saved.created_at;
+        }
+        async function syncDataToSupabase() {
+            if (!dbReady || !currentUser) return;
+            for (const p of data.products) {
+                const row = productToRow(p);
+                if (row.id) {
+                    const result = await supabaseClient.from('products').update(row).eq('id', row.id).eq('user_id', currentUser.id).select().single();
+                    if (result.error) throw result.error;
+                    if (!result.data) throw new Error('A product could not be saved. Refresh and try again.');
+                } else {
+                    const result = await supabaseClient.from('products').insert(row).select().single();
+                    const saved = throwIfError(result); const oldId = p.id; p.id = saved.id;
+                    data.moves.forEach(m => { if (m.pid === oldId) m.pid = saved.id; });
+                }
+            }
+            for (const m of data.moves) if (!UUID_RE.test(String(m.id))) await insertMovement(m);
+            try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (_) {}
+        }
+        async function loadSupabaseData(user) {
+            currentUser = user;
+            const productResult = await supabaseClient.from('products').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
+            const dbProducts = throwIfError(productResult);
+            if (dbProducts.length === 0) {
+                const localProducts = Array.isArray(data.products) ? data.products.map(p => ({ ...p })) : seed.map(p => ({ ...p }));
+                const localMoves = Array.isArray(data.moves) ? data.moves.map(m => ({ ...m })) : seedMoves.map(m => ({ ...m }));
+                data = { products: localProducts, moves: localMoves };
+                dbReady = true;
+                await syncDataToSupabase();
+            } else {
+                const moveResult = await supabaseClient.from('stock_movements').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+                const dbMoves = throwIfError(moveResult);
+                data = { products: dbProducts.map(rowToProduct), moves: dbMoves.map(rowToMove) };
+                try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (_) {}
+                dbReady = true;
+            }
+            render(); recommend();
+        }
+        function notify(s, type = '') { $('toast').innerHTML = `<div class="toast ${type}">${esc(s)}</div>`; setTimeout(() => $('toast').innerHTML = '', 2600) }
+        function card(label, value, ico, cls, foot) { return `<div class="metric"><div class="metric-head">${label}<span class="mi ${cls}">${ico}</span></div><div class="value">${value}</div><div class="foot">${foot}</div></div>` }
+        function metrics(id) { let p = data.products, units = p.reduce((s, x) => s + x.qty, 0), low = p.filter(x => st(x) === 'low').length, out = p.filter(x => st(x) === 'out').length, val = p.reduce((s, x) => s + x.qty * x.cost, 0); $(id).innerHTML = card('Total products', fmt(p.length), '▦', '', 'Unique listed products') + card('Units in stock', fmt(units), '▤', 'g', 'Across all products') + card('Low-stock items', fmt(low), '!', 'o', low + ' need attention') + card('Inventory value', cash(val), '₦', '', 'At recorded purchase cost') + (id === 'metrics' ? card('Out of stock', fmt(out), '×', 'r', out + ' unavailable') : '') }
+        function renderChart() { let labs = ['6d', '5d', '4d', '3d', '2d', '1d', 'Today'], sales = [], rest = []; labs.forEach((_, i) => { let d = new Date(); d.setDate(d.getDate() - (6 - i)); sales.push(data.moves.filter(m => m.type === 'Sale' && new Date(m.date).toDateString() === d.toDateString()).reduce((s, m) => s + m.qty, 0)); rest.push(data.moves.filter(m => m.type === 'Restock' && new Date(m.date).toDateString() === d.toDateString()).reduce((s, m) => s + m.qty, 0)) }); let max = Math.max(1, ...sales, ...rest); $('chart').innerHTML = labs.map((l, i) => `<div class="col"><div class="bars"><div class="bar" style="height:${Math.max(3, sales[i] / max * 100)}%" title="${sales[i]} sold"></div><div class="bar alt" style="height:${Math.max(3, rest[i] / max * 100)}%" title="${rest[i]} restocked"></div></div><span class="day">${l}</span></div>`).join('') }
+        function renderAlerts() { let a = data.products.filter(p => st(p) !== 'ok').sort((x, y) => x.qty - y.qty).slice(0, 5); $('alerts').innerHTML = a.length ? a.map(p => `<div class="item"><div class="emoji">${p.emoji || '📦'}</div><div class="item-main"><b>${esc(p.name)}</b><small>${status(st(p))} · minimum ${p.min}</small></div><span class="qty">${p.qty} left</span></div>`).join('') : '<div class="empty">All products are above their minimum stock levels.</div>' }
+        function renderRecent() { let a = [...data.moves].sort((x, y) => new Date(y.date) - new Date(x.date)).slice(0, 5); $('recent').innerHTML = a.length ? a.map(m => `<div class="item"><div class="mi ${m.type === 'Sale' ? 'o' : 'g'}">${m.type === 'Sale' ? '↘' : '↗'}</div><div class="item-main"><b>${esc(prod(m.pid)?.name || 'Deleted product')} · ${m.type}</b><small>${datefmt(m.date)} · ${esc(m.note)}</small></div><strong style="color:${m.type === 'Sale' ? 'var(--orange)' : 'var(--green)'}">${m.type === 'Sale' ? '−' : '+'}${m.qty}</strong></div>`).join('') : '<div class="empty">No activity yet.</div>' }
+        function renderProducts() { let q = $('search').value.toLowerCase(), f = $('filter').value; let arr = data.products.filter(p => (p.name + ' ' + p.sku).toLowerCase().includes(q) && (f === 'all' || st(p) === f)); $('products').innerHTML = arr.map(p => `<tr><td><b>${p.emoji || '📦'} ${esc(p.name)}</b><div class="foot">${esc(p.sku)}</div></td><td>${esc(p.category)}</td><td><b>${p.qty}</b><span class="foot"> / min ${p.min}</span></td><td>${cash(p.cost)}</td><td>${cash(p.price)}</td><td><span class="status ${st(p)}">${status(st(p))}</span></td><td><button class="smallbtn" data-act="sale" data-id="${p.id}">− Sale</button><button class="smallbtn" data-act="restock" data-id="${p.id}">＋</button><button class="smallbtn" data-act="edit" data-id="${p.id}">Edit</button></td></tr>`).join(''); $('noProducts').classList.toggle('hide', arr.length > 0); $('count').textContent = data.products.length }
+        function renderMoves() { let q = $('moveSearch').value.toLowerCase(), f = $('moveFilter').value; let arr = [...data.moves].sort((x, y) => new Date(y.date) - new Date(x.date)).filter(m => (f === 'all' || m.type === f) && ((prod(m.pid)?.name || '').toLowerCase().includes(q) || (m.note || '').toLowerCase().includes(q))); $('moves').innerHTML = arr.map(m => `<tr><td>${datefmt(m.date)}</td><td>${esc(prod(m.pid)?.name || 'Deleted product')}</td><td><span class="status ${m.type === 'Sale' ? 'low' : m.type === 'Restock' ? 'ok' : 'out'}">${m.type}</span></td><td style="color:${m.type === 'Sale' ? 'var(--orange)' : 'var(--green)'}">${m.type === 'Sale' ? '−' : '+'}${m.qty}</td><td>${m.after}</td><td>${esc(m.note || '—')}</td></tr>`).join(''); $('noMoves').classList.toggle('hide', arr.length > 0) }
+        function recommend() { let budget = Math.max(0, Number($('budget').value) || 0), left = budget; let a = data.products.filter(p => st(p) !== 'ok' && p.cost > 0).map(p => { let sales = data.moves.filter(m => m.pid === p.id && m.type === 'Sale' && Date.now() - new Date(m.date) < 30 * 864e5).reduce((s, m) => s + m.qty, 0); return { ...p, need: Math.max(0, p.min - p.qty), sales, score: (p.qty <= 0 ? 40 : p.qty <= p.min / 2 ? 30 : 20) + Math.min(sales, 10) } }).sort((x, y) => y.score - x.score); let plan = a.map(p => { let qty = Math.min(p.need, Math.floor(left / p.cost)); left -= qty * p.cost; return { ...p, qty, costTotal: qty * p.cost } }).filter(p => p.qty > 0), spent = plan.reduce((s, p) => s + p.costTotal, 0); let out = `<div class="panel" style="margin-top:14px"><h3>Recommended restock plan</h3><p class="sub">Estimated spend: <b style="color:var(--green)">${cash(spent)}</b> · Budget remaining: <b>${cash(budget - spent)}</b></p>`; if (!a.length) out += '<div class="empty">No products currently need restocking.</div>'; else if (!plan.length) out += '<div class="empty">Your budget cannot cover a unit of the products needing restock. Increase it or check unit costs.</div>'; else out += plan.map(p => `<div class="rec"><b>${p.emoji || '📦'} ${esc(p.name)} <span style="float:right;color:var(--orange);font-size:10px">${p.qty <= 0 ? 'URGENT' : 'PRIORITY'}</span></b><small>${p.qty === 0 ? 'Out of stock. ' : ''}Current stock ${p.qty} · minimum ${p.min} · restock ${p.qty} unit(s). ${p.sales ? `${p.sales} recorded unit(s) sold in the last 30 days.` : 'Limited recent sales history; priority is based mainly on stock thresholds.'}</small><strong>${cash(p.costTotal)} <span style="color:var(--muted);font-weight:400">(${cash(p.cost)} each)</span></strong></div>`).join(''); out += '<p class="notice">Recommendations are based on current stock, minimum levels, recorded sales and unit costs. This is not a demand forecast.</p></div>'; $('recs').innerHTML = out }
+        function reports() { let sold = data.moves.filter(m => m.type === 'Sale').reduce((s, m) => s + m.qty, 0), rest = data.moves.filter(m => m.type === 'Restock').reduce((s, m) => s + m.qty, 0), val = data.products.reduce((s, p) => s + p.qty * p.cost, 0), alerts = data.products.filter(p => st(p) !== 'ok').length; $('reportsMetrics').innerHTML = card('Inventory value', cash(val), '₦', '', 'Current quantity × unit cost') + card('Recorded units sold', fmt(sold), '↘', 'o', 'All sale movements') + card('Units restocked', fmt(rest), '↗', 'g', 'All restock movements') + card('Stock alerts', fmt(alerts), '!', 'o', 'Low or out of stock'); let tops = data.products.map(p => ({ ...p, sold: data.moves.filter(m => m.pid === p.id && m.type === 'Sale').reduce((s, m) => s + m.qty, 0) })).filter(p => p.sold).sort((a, b) => b.sold - a.sold); $('top').innerHTML = tops.length ? tops.slice(0, 5).map(p => `<div class="item"><div class="emoji">${p.emoji || '📦'}</div><div class="item-main"><b>${esc(p.name)}</b><small>${p.sold} units sold in recorded movements</small></div><strong>${p.sold}</strong></div>`).join('') : '<div class="empty">Record sales to see activity.</div>'; let counts = ['ok', 'low', 'out']; $('health').innerHTML = counts.map(s => `<div class="item"><div class="item-main"><b>${status(s)}</b><small>${data.products.length ? Math.round(data.products.filter(p => st(p) === s).length / data.products.length * 100) : 0}% of products</small></div><span class="status ${s}">${data.products.filter(p => st(p) === s).length}</span></div>`).join('') }
+        function render() { metrics('metrics'); renderChart(); renderAlerts(); renderRecent(); renderProducts(); renderMoves(); reports(); $('count').textContent = data.products.length }
+        const info = { dashboard: ['Dashboard overview', 'Know what you have. Know what needs attention.'], inventory: ['Product inventory', 'Your catalogue, quantities, prices and stock health.'], movements: ['Stock movements', 'A traceable record of every sale, restock and adjustment.'], advisor: ['StockSense Adviser', 'Turn your available budget into a smarter restocking plan.'], reports: ['Reports & insights', 'Understand the inventory and activity you have recorded.'] };
+        function go(p) { document.querySelectorAll('.page').forEach(x => x.classList.toggle('active', x.id === 'page-' + p)); document.querySelectorAll('[data-page]').forEach(x => x.classList.toggle('active', x.dataset.page === p)); $('title').textContent = info[p][0]; $('subtitle').textContent = info[p][1]; $('sidebar').classList.remove('open'); if (p === 'advisor') recommend(); if (p === 'reports') reports() }
+        function closeModal() { $('modal').innerHTML = '' }
+        function productModal(p = null) { let edit = !!p, d = p || { name: '', sku: '', category: 'Phone accessories', cost: '', price: '', qty: '', min: 5 }; $('modal').innerHTML = `<div class="modalbg" id="mb"><form class="modal" id="pf"><h2>${edit ? 'Edit product' : 'Add a product'}</h2><p>Accurate product data makes your dashboard and restocking advice more useful.</p><div class="formgrid"><div class="fg full"><label>Product name *</label><input class="field" name="name" required value="${esc(d.name)}" placeholder="USB-C Fast Charger"></div><div class="fg"><label>SKU</label><input class="field" name="sku" value="${esc(d.sku)}" placeholder="ACC-009"></div><div class="fg"><label>Category *</label><input class="field" name="category" required value="${esc(d.category)}"></div><div class="fg"><label>Unit purchase cost (₦) *</label><input class="field" name="cost" type="number" min="0" step=".01" required value="${d.cost}"></div><div class="fg"><label>Selling price (₦) *</label><input class="field" name="price" type="number" min="0" step=".01" required value="${d.price}"></div><div class="fg"><label>Quantity in stock *</label><input class="field" name="qty" type="number" min="0" step="1" required value="${d.qty}"></div><div class="fg"><label>Minimum stock level *</label><input class="field" name="min" type="number" min="0" step="1" required value="${d.min}"></div></div><div class="actions"><button type="button" class="btn secondary" id="cancel">Cancel</button><button class="btn primary">${edit ? 'Save changes' : 'Add product'}</button></div></form></div>`; $('cancel').onclick = closeModal; $('mb').onclick = e => { if (e.target.id === 'mb') closeModal() }; $('pf').onsubmit = e => { e.preventDefault(); let f = new FormData(e.target), sku = f.get('sku').trim(); if (data.products.some(x => x.id !== p?.id && sku && x.sku.toLowerCase() === sku.toLowerCase())) return notify('That SKU is already in use.', 'error'); let item = { id: p?.id || Date.now().toString(), name: f.get('name').trim(), sku, category: f.get('category').trim(), cost: +f.get('cost'), price: +f.get('price'), qty: +f.get('qty'), min: +f.get('min'), emoji: p?.emoji || '📦' }; if (!item.name || ![item.cost, item.price, item.qty, item.min].every(Number.isFinite) || Object.values({ cost: item.cost, price: item.price, qty: item.qty, min: item.min }).some(v => v < 0)) return notify('Check product details.', 'error'); if (edit) { let before = p.qty; Object.assign(p, item); if (before !== p.qty) data.moves.push({ id: 'm' + Date.now(), pid: p.id, type: 'Adjustment', qty: Math.abs(p.qty - before), before, after: p.qty, date: new Date().toISOString(), note: 'Quantity changed during edit' }) } else { data.products.push(item); if (item.qty) data.moves.push({ id: 'm' + Date.now(), pid: item.id, type: 'Adjustment', qty: item.qty, before: 0, after: item.qty, date: new Date().toISOString(), note: 'Opening stock' }) } save(); closeModal(); render(); notify(edit ? 'Product updated.' : 'Product added.') } }
+        function movementModal(id, type) { let p = prod(id), sale = type === 'Sale'; if (!p) return; $('modal').innerHTML = `<div class="modalbg" id="mb"><form class="modal" id="mf"><h2>Record ${sale ? 'a sale' : 'a restock'}</h2><p>${esc(p.name)} · Current stock: <b>${p.qty}</b></p><div class="formgrid"><div class="fg full"><label>Quantity *</label><input class="field" name="qty" type="number" min="1" max="${sale ? p.qty : 1000000}" step="1" required></div><div class="fg full"><label>Note (optional)</label><input class="field" name="note" placeholder="${sale ? 'Counter sale' : 'Supplier delivery'}"></div></div><div class="actions"><button type="button" class="btn secondary" id="cancel">Cancel</button><button class="btn ${sale ? 'primary' : 'greenbtn'}">Record ${sale ? 'sale' : 'restock'}</button></div></form></div>`; $('cancel').onclick = closeModal; $('mb').onclick = e => { if (e.target.id === 'mb') closeModal() }; $('mf').onsubmit = e => { e.preventDefault(); let f = new FormData(e.target), q = +f.get('qty'); if (!Number.isInteger(q) || q < 1) return notify('Enter a whole quantity above zero.', 'error'); if (sale && q > p.qty) return notify('Sale exceeds available stock.', 'error'); let before = p.qty; p.qty += sale ? -q : q; data.moves.push({ id: 'm' + Date.now(), pid: p.id, type, qty: q, before, after: p.qty, date: new Date().toISOString(), note: f.get('note').trim() || (sale ? 'Sale recorded' : 'Stock replenishment') }); save(); closeModal(); render(); notify(sale ? 'Sale recorded; stock updated.' : 'Restock recorded; stock updated.') } }
+        document.addEventListener('click', e => { let n = e.target.closest('[data-page]'), g = e.target.closest('[data-go]'), a = e.target.closest('[data-act]'); if (n) go(n.dataset.page); if (g) go(g.dataset.go); if (a) { if (a.dataset.act === 'edit') productModal(prod(a.dataset.id)); else movementModal(a.dataset.id, a.dataset.act === 'sale' ? 'Sale' : 'Restock') } });
+        $('add').onclick = $('add2').onclick = () => productModal(); $('menu').onclick = () => $('sidebar').classList.toggle('open'); $('search').oninput = renderProducts; $('filter').onchange = renderProducts; $('moveSearch').oninput = renderMoves; $('moveFilter').onchange = renderMoves; $('run').onclick = recommend; $('budget').onkeydown = e => { if (e.key === 'Enter') recommend() }; $('export').onclick = () => { let rows = [['Date', 'Product', 'Type', 'Quantity', 'Before', 'After', 'Note'], ...data.moves.map(m => [m.date, prod(m.pid)?.name || '', m.type, m.type === 'Sale' ? -m.qty : m.qty, m.before, m.after, m.note])], csv = rows.map(r => r.map(x => '"' + String(x ?? '').replace(/"/g, '""') + '"').join(',')).join('\r\n'), a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'stocksense-movements.csv'; a.click(); URL.revokeObjectURL(a.href) };
+        $('date').textContent = new Date().toLocaleDateString('en-NG', { weekday: 'short', day: 'numeric', month: 'short' }); render(); recommend();
+    </script>
+
+    <script>
+        const authScreen = document.getElementById('auth-screen');
+        const authForm = document.getElementById('auth-form');
+        const authMessage = document.getElementById('auth-message');
+        const appRoot = document.querySelector('.app');
+
+        async function checkStockSenseSession() {
+            authScreen.style.display = 'flex';
+            appRoot.style.display = 'none';
+
+            const { data, error } = await supabaseClient.auth.getSession();
+
+            if (error) {
+                authMessage.textContent = 'Could not check your session. Please refresh.';
+                return;
+            }
+
+            if (data.session) {
+                authMessage.textContent = 'Loading your inventory...';
+                try {
+                    await loadSupabaseData(data.session.user);
+                    authMessage.textContent = '';
+                    authScreen.style.display = 'none';
+                    appRoot.style.display = 'grid';
+                } catch (loadError) {
+                    console.error(loadError);
+                    authMessage.textContent = 'Could not load inventory: ' + (loadError.message || 'check Supabase tables and policies');
+                }
+            }
+        }
+
+        authForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            authMessage.textContent = 'Signing in...';
+
+            const email = document.getElementById('auth-email').value.trim();
+            const password = document.getElementById('auth-password').value;
+
+            const { data, error } = await supabaseClient.auth.signInWithPassword({
+                email,
+                password
+            });
+
+            if (error) {
+                authMessage.textContent = error.message;
+                return;
+            }
+
+            if (data.session) {
+                authMessage.textContent = 'Loading your inventory...';
+                try {
+                    await loadSupabaseData(data.session.user);
+                    authMessage.textContent = '';
+                    authScreen.style.display = 'none';
+                    appRoot.style.display = 'grid';
+                } catch (loadError) {
+                    console.error(loadError);
+                    authMessage.textContent = 'Signed in, but inventory could not load: ' + (loadError.message || 'check Supabase setup');
+                }
+            }
+        });
+
+        supabaseClient.auth.onAuthStateChange((event, session) => {
+            if (event === 'SIGNED_OUT' || !session) {
+                currentUser = null; dbReady = false;
+                authScreen.style.display = 'flex';
+                appRoot.style.display = 'none';
+            }
+        });
+
+        checkStockSenseSession();
+    </script>
+
+</body>
+
+</html>
