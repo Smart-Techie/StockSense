@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>StockSense — Know Your Stock. Grow Your Business.</title>
+    <meta name="description" content="StockSense is an intelligent inventory management platform for small businesses. Track stock, record sales, automate SKUs, and make smarter restocking decisions.">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+    <!-- Authentication Screen (Sign In, Sign Up, Check Email, Forgot Password, Recovery) -->
+    <div id="auth-screen">
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="auth-brand">
+                    <div class="logo" style="width:36px;height:36px;font-size:18px">S</div>
+                    <span>Stock<span style="color:var(--green)">Sense</span></span>
+                </div>
+                <p class="auth-subtitle">Know Your Stock. Grow Your Business.</p>
+            </div>
+            <div id="auth-card-body">
+                <!-- Dynamically populated by app.js (Sign in, Sign up, Forgot, Recovery, Loading) -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Navigation Drawer Overlay -->
+    <div id="sidebar-overlay" class="side-overlay"></div>
+
+    <!-- Authenticated StockSense Application -->
+    <div class="app" id="app-root" style="display:none">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="side" id="sidebar">
+            <div class="brand">
+                <div class="logo">S</div>
+                <div>
+                    <b>Stock<span style="color:var(--green)">Sense</span></b>
+                    <small>Inventory intelligence</small>
+                </div>
+            </div>
+
+            <div>
+                <div class="label">Workspace</div>
+                <nav class="nav">
+                    <button class="active" data-page="dashboard">
+                        <span class="icon">◫</span>Dashboard
+                    </button>
+                    <button data-page="inventory">
+                        <span class="icon">▦</span>Inventory 
+                        <span class="nav-badge" id="count">0</span>
+                    </button>
+                    <button data-page="movements">
+                        <span class="icon">↔</span>Stock movements
+                    </button>
+                    <button data-page="advisor">
+                        <span class="icon">✧</span>StockSense Adviser
+                    </button>
+                    <button data-page="reports">
+                        <span class="icon">▥</span>Reports & insights
+                    </button>
+                    <button class="admin-nav-item hide" id="nav-btn-admin" data-page="admin">
+                        <span class="icon">🛡</span>Admin Portal
+                        <span class="nav-badge">ADMIN</span>
+                    </button>
+                </nav>
+            </div>
+
+            <div class="tip">
+                <b>Make smarter moves ✦</b>
+                <p>Use your real stock counts to decide where your next naira goes.</p>
+                <a data-go="advisor">Open Stock Adviser →</a>
+            </div>
+
+            <!-- User profile footer with Sign Out -->
+            <div class="user-profile-card">
+                <div class="user-info">
+                    <div class="user-avatar" id="sidebar-user-avatar">U</div>
+                    <div class="user-details">
+                        <b id="sidebar-user-name">Loading...</b>
+                        <small id="sidebar-user-email">...</small>
+                    </div>
+                </div>
+                <button class="btn-signout" id="btn-signout" type="button" title="Sign out of your account">
+                    <span>↪</span> Sign Out
+                </button>
+            </div>
+
+            <small style="color:#70657e;padding:0 5px;font-size:10px;text-align:center">STOCKSENSE • VERSION 1.0</small>
+        </aside>
+
+        <!-- Main Workspace Area -->
+        <main>
+            <header class="top">
+                <div>
+                    <button class="btn secondary mobile" id="menu" aria-label="Open menu">☰</button>
+                    <div class="eyebrow" id="eyebrow">Your business at a glance</div>
+                    <h1 class="h1" id="title">Dashboard overview</h1>
+                    <p class="muted" id="subtitle">Know what you have. Know what needs attention.</p>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                    <span class="desktop muted" id="date"></span>
+                    <button class="btn primary" id="add">＋ Add product</button>
+                </div>
+            </header>
+
+            <!-- Page 1: Dashboard Overview -->
+            <section class="page active" id="page-dashboard">
+                <div class="welcome">
+                    <div>
+                        <div class="eyebrow">Welcome to StockSense</div>
+                        <h2>Let's make every product count.</h2>
+                        <p>Catch shortages early, track every sale and restock, and allocate your inventory budget with confidence.</p>
+                    </div>
+                    <div class="spark">✧</div>
+                </div>
+
+                <div class="metrics" id="metrics"></div>
+
+                <div class="grid">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Stock activity</h3>
+                                <p class="sub">Recorded sales and restocks over the last 7 days</p>
+                            </div>
+                        </div>
+                        <div class="chart" id="chart"></div>
+                        <div class="sub" style="margin:10px 0 0;font-size:10px">Purple = units sold · Green = units restocked</div>
+                    </div>
+                    <div class="panel">
+                        <h3>Needs attention</h3>
+                        <p class="sub">Products that have reached or dropped below minimum stock</p>
+                        <div class="list" id="alerts"></div>
+                    </div>
+                </div>
+
+                <div class="grid">
+                    <div class="panel">
+                        <h3>Recent stock movements</h3>
+                        <p class="sub">A traceable record of what changed</p>
+                        <div class="list" id="recent"></div>
+                    </div>
+                    <div class="panel">
+                        <h3>StockSense Adviser ✧</h3>
+                        <p class="sub">Prioritized decision support for your next restock</p>
+                        <div class="advisor">
+                            <b>Make your restocking budget work harder.</b>
+                            <p>Get data-backed restocking priorities, suggested quantities, and cost breakdowns.</p>
+                            <button class="btn primary" data-go="advisor" style="margin-top:8px">Get recommendations →</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Page 2: Product Inventory Management -->
+            <section class="page" id="page-inventory">
+                <div class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Product inventory</h3>
+                            <p class="sub">Manage catalogue products, prices, stock levels and SKUs.</p>
+                        </div>
+                        <div style="display:flex;gap:8px">
+                            <button class="btn secondary" id="exportInventory">↓ Export Catalogue CSV</button>
+                            <button class="btn primary" id="add2">＋ Add product</button>
+                        </div>
+                    </div>
+
+                    <div class="toolbar">
+                        <input class="field search" id="search" placeholder="Search by product name or SKU…">
+                        <select id="filter" class="field">
+                            <option value="all">All stock statuses</option>
+                            <option value="ok">In stock</option>
+                            <option value="low">Low stock</option>
+                            <option value="out">Out of stock</option>
+                        </select>
+                        <select id="catFilter" class="field">
+                            <option value="all">All categories</option>
+                        </select>
+                    </div>
+
+                    <div class="tablewrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Product & SKU</th>
+                                    <th>Category</th>
+                                    <th>Stock Count</th>
+                                    <th>Unit Purchase Cost</th>
+                                    <th>Selling Price</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="products"></tbody>
+                        </table>
+                    </div>
+                    <div class="empty hide" id="noProducts">No matching products found. Click "＋ Add product" to create one.</div>
+                </div>
+            </section>
+
+            <!-- Page 3: Stock Movement History -->
+            <section class="page" id="page-movements">
+                <div class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Stock movement history</h3>
+                            <p class="sub">Immutable audit log of every sale, restock and adjustment.</p>
+                        </div>
+                        <button class="btn secondary" id="export">↓ Export Movements CSV</button>
+                    </div>
+
+                    <div class="toolbar">
+                        <input class="field search" id="moveSearch" placeholder="Search product name, SKU or note…">
+                        <select id="moveFilter" class="field">
+                            <option value="all">All movement types</option>
+                            <option value="Sale">Sales</option>
+                            <option value="Restock">Restocks</option>
+                            <option value="Adjustment">Adjustments</option>
+                        </select>
+                    </div>
+
+                    <div class="tablewrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Date & Time</th>
+                                    <th>Product</th>
+                                    <th>Type</th>
+                                    <th>Quantity Change</th>
+                                    <th>Resulting Stock</th>
+                                    <th>Note / Reference</th>
+                                </tr>
+                            </thead>
+                            <tbody id="moves"></tbody>
+                        </table>
+                    </div>
+                    <div class="empty hide" id="noMoves">No matching stock movements found.</div>
+                </div>
+            </section>
+
+            <!-- Page 4: StockSense Adviser -->
+            <section class="page" id="page-advisor">
+                <div class="welcome">
+                    <div>
+                        <div class="eyebrow">Decision support</div>
+                        <h2>Your next restock, made clearer.</h2>
+                        <p>Recommendations use your actual stored inventory counts, unit costs, and recorded sales velocity — transparent and rule-based.</p>
+                    </div>
+                    <div class="spark">✧</div>
+                </div>
+
+                <div class="grid">
+                    <div class="panel">
+                        <h3>Build your restocking plan</h3>
+                        <p class="sub">Enter your available spending budget in Naira.</p>
+                        <div class="advisor">
+                            <label for="budget"><b>Available budget (₦)</b></label>
+                            <div class="budgetrow">
+                                <input class="field" id="budget" type="number" min="0" step="500" value="25000">
+                                <button class="btn primary" id="run">Find priorities ✧</button>
+                            </div>
+                            <p style="margin-bottom:0;font-size:11px;color:#c4b8d3">
+                                Suggested quantities strictly respect your budget and prioritize out-of-stock items and items with recorded sales.
+                            </p>
+                        </div>
+                        <div id="recs"></div>
+                    </div>
+
+                    <div class="panel">
+                        <h3>How priorities are calculated</h3>
+                        <p class="sub">Transparent rules you can verify.</p>
+                        <div class="list">
+                            <div class="item">
+                                <div class="mi o">!</div>
+                                <div class="item-main">
+                                    <b>Stock urgency threshold</b>
+                                    <small>Items currently out of stock or below minimum stock receive highest priority.</small>
+                                </div>
+                            </div>
+                            <div class="item">
+                                <div class="mi g">↗</div>
+                                <div class="item-main">
+                                    <b>Recorded sales velocity</b>
+                                    <small>Products with recorded customer sales in the past 30 days receive an elevated ranking.</small>
+                                </div>
+                            </div>
+                            <div class="item">
+                                <div class="mi p">₦</div>
+                                <div class="item-main">
+                                    <b>Exact budget fit</b>
+                                    <small>Suggestions calculate whole units using recorded purchase unit costs within your budget.</small>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="notice">
+                            StockSense Adviser v1.0 is a rule-based decision support system. It relies strictly on your recorded inventory counts and movements.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Page 5: Reports & Insights -->
+            <section class="page" id="page-reports">
+                <div class="metrics" id="reportsMetrics"></div>
+                <div class="grid">
+                    <div class="panel">
+                        <h3>Top selling products</h3>
+                        <p class="sub">Ranked by total units sold in recorded movements</p>
+                        <div class="list" id="top"></div>
+                    </div>
+                    <div class="panel">
+                        <h3>Stock health distribution</h3>
+                        <p class="sub">Current stock status across your product catalogue</p>
+                        <div class="list" id="health"></div>
+                    </div>
+                </div>
+                <p class="notice">
+                    Inventory valuation is computed as Current Quantity × Unit Purchase Cost. Recorded sales quantities reflect movements entered and are not an audited financial profit or loss statement.
+                </p>
+            </section>
+
+            <!-- Page 6: Dedicated Platform Administration Dashboard -->
+            <section class="page" id="page-admin">
+                <div class="admin-badge-header">
+                    <span>🛡 Platform Administration</span>
+                </div>
+
+                <div class="admin-nav-tabs">
+                    <button class="admin-nav-tab active" data-admin-tab="overview">Overview</button>
+                    <button class="admin-nav-tab" data-admin-tab="users">User Management</button>
+                    <button class="admin-nav-tab" data-admin-tab="roles">Roles & Administrators</button>
+                    <button class="admin-nav-tab" data-admin-tab="logs">Audit Logs</button>
+                    <button class="admin-nav-tab" data-admin-tab="settings">Platform Settings</button>
+                </div>
+
+                <!-- Admin Tab 1: Overview -->
+                <div class="admin-section active" id="admin-sec-overview">
+                    <div class="metrics" id="admin-metrics"></div>
+                    <div class="grid">
+                        <div class="panel">
+                            <h3>Platform System Health</h3>
+                            <p class="sub">Database connection and security enforcement status</p>
+                            <div class="list">
+                                <div class="item">
+                                    <div class="mi g">✓</div>
+                                    <div class="item-main">
+                                        <b>Supabase PostgreSQL Database</b>
+                                        <small>Connected · Row Level Security (RLS) Active</small>
+                                    </div>
+                                    <span class="status ok">Operational</span>
+                                </div>
+                                <div class="item">
+                                    <div class="mi g">✓</div>
+                                    <div class="item-main">
+                                        <b>Authentication & Session Engine</b>
+                                        <small>Supabase Auth · Secure JWT with auto-refresh</small>
+                                    </div>
+                                    <span class="status ok">Operational</span>
+                                </div>
+                                <div class="item">
+                                    <div class="mi p">🔒</div>
+                                    <div class="item-main">
+                                        <b>Multi-tenant Data Isolation</b>
+                                        <small>User-scoped policies on products and movements</small>
+                                    </div>
+                                    <span class="status ok">Enforced</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3>Recent Administrative Actions</h3>
+                            <p class="sub">Audit log of administrative and security events</p>
+                            <div class="list" id="admin-recent-logs"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Tab 2: User Management -->
+                <div class="admin-section" id="admin-sec-users">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Registered User Accounts</h3>
+                                <p class="sub">Inspect client accounts, verify registration dates, and manage account statuses.</p>
+                            </div>
+                        </div>
+
+                        <div class="toolbar">
+                            <input class="field search" id="admin-user-search" placeholder="Search by name, email, or UUID…">
+                            <select id="admin-user-role-filter" class="field">
+                                <option value="all">All roles</option>
+                                <option value="owner">Owner</option>
+                                <option value="admin">Administrator</option>
+                                <option value="moderator">Moderator</option>
+                                <option value="none">Standard Member</option>
+                            </select>
+                            <select id="admin-user-status-filter" class="field">
+                                <option value="all">All statuses</option>
+                                <option value="active">Active accounts</option>
+                                <option value="suspended">Suspended accounts</option>
+                            </select>
+                        </div>
+
+                        <div class="tablewrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Name & User ID</th>
+                                        <th>Email Address</th>
+                                        <th>Role</th>
+                                        <th>Status</th>
+                                        <th>Registered Date</th>
+                                        <th>Last Active</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-users-table"></tbody>
+                            </table>
+                        </div>
+
+                        <div class="pagination-bar">
+                            <span id="admin-users-pagination-info">Showing users</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Tab 3: Roles & Administrators -->
+                <div class="admin-section" id="admin-sec-roles">
+                    <div class="panel" style="margin-bottom:20px">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Platform Owner Designation</h3>
+                                <p class="sub">Secure bootstrap and authority configuration.</p>
+                            </div>
+                            <button class="btn primary" id="admin-btn-bootstrap-owner">⚡ Bootstrap as Platform Owner</button>
+                        </div>
+                        <p style="font-size:12px;color:#c4b8d3;line-height:1.5">
+                            The initial Platform Owner has supreme platform-level authority, including the power to appoint future administrators. 
+                            If you are the creator of this StockSense deployment and no Owner has been claimed yet, you can bootstrap your account using the button above.
+                        </p>
+                    </div>
+
+                    <div class="panel">
+                        <h3>Future-Ready Role Architecture</h3>
+                        <p class="sub">Privilege model documentation and role separation</p>
+                        <div class="list">
+                            <div class="item">
+                                <div class="mi p">👑</div>
+                                <div class="item-main">
+                                    <b>Owner</b>
+                                    <small>Supreme authority. Can appoint, change, or revoke administrators. Cannot be suspended. Safeguard prevents deleting the last owner.</small>
+                                </div>
+                                <span class="role-badge owner">Owner</span>
+                            </div>
+                            <div class="item">
+                                <div class="mi g">🛡</div>
+                                <div class="item-main">
+                                    <b>Administrator</b>
+                                    <small>Can view platform statistics, inspect registered user accounts, suspend and reactivate accounts, and review audit logs.</small>
+                                </div>
+                                <span class="role-badge admin">Admin</span>
+                            </div>
+                            <div class="item">
+                                <div class="mi o">👁</div>
+                                <div class="item-main">
+                                    <b>Moderator (Future Role)</b>
+                                    <small>Read-only monitoring of platform health, user activity, and audit logs.</small>
+                                </div>
+                                <span class="role-badge moderator">Moderator</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Tab 4: Audit Logs -->
+                <div class="admin-section" id="admin-sec-logs">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Administrative Audit Trail</h3>
+                                <p class="sub">Immutable record of suspensions, role changes, and administrative actions.</p>
+                            </div>
+                        </div>
+                        <div class="list" id="admin-full-logs-list">
+                            <div class="empty">Audit logs are recorded in the <code>admin_audit_logs</code> database table.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Tab 5: Platform Settings -->
+                <div class="admin-section" id="admin-sec-settings">
+                    <div class="panel" style="max-width:600px">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Platform Configuration</h3>
+                                <p class="sub">Manage platform parameters for Version 1.0.</p>
+                            </div>
+                        </div>
+
+                        <form id="form-admin-settings">
+                            <div class="fg" style="margin-bottom:14px">
+                                <label for="setting-platform-name">Platform Application Name</label>
+                                <input class="field" id="setting-platform-name" value="StockSense">
+                            </div>
+                            <div class="fg" style="margin-bottom:14px">
+                                <label for="setting-currency-symbol">Default Currency Symbol</label>
+                                <input class="field" id="setting-currency-symbol" value="₦">
+                            </div>
+                            <div class="fg" style="margin-bottom:18px">
+                                <label for="setting-low-stock">Default Low Stock Threshold</label>
+                                <input class="field" id="setting-low-stock" type="number" min="1" value="5">
+                            </div>
+                            <button class="btn primary" id="btn-save-settings" type="submit">Save Platform Settings</button>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <p class="footnote">
+                STOCKSENSE • KNOW YOUR STOCK. GROW YOUR BUSINESS. 
+                <span style="color:var(--lav)">◆</span> Version 1.0 Production Release
+            </p>
+        </main>
+    </div>
+
+    <!-- Dynamic Modal Dialog Target -->
+    <div id="modal"></div>
+
+    <!-- Dynamic Toast Notification Target -->
+    <div id="toast" aria-live="polite"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./supabase-config.js"></script>
+    <script src="./app.js"></script>
+
+</body>
+
+</html>
