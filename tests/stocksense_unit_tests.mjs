@@ -262,8 +262,51 @@ test('CSV formatter escapes commas, quotes, and line breaks properly', () => {
     assert.strictEqual(formatted, '"Fast Charger","ACC-001, v2","Includes ""premium"" cable\n2m","1500"');
 });
 
+// -----------------------------------------------------------------------------
+// 7. 30-Minute Session Inactivity Timeout Logic
+// -----------------------------------------------------------------------------
+const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes (1,800,000 ms)
+
+function isSessionExpired(lastActivityTimestamp, currentTimestamp = Date.now()) {
+    if (!lastActivityTimestamp || isNaN(lastActivityTimestamp) || lastActivityTimestamp <= 0) {
+        return false;
+    }
+    return (currentTimestamp - lastActivityTimestamp) >= INACTIVITY_TIMEOUT_MS;
+}
+
+test('Inactivity check flags session expired when 30 minutes or more have passed', () => {
+    const now = Date.now();
+    const exactly30MinsAgo = now - (30 * 60 * 1000);
+    const thirtyOneMinsAgo = now - (31 * 60 * 1000);
+    const twoHoursAgo = now - (120 * 60 * 1000);
+
+    assert.strictEqual(isSessionExpired(exactly30MinsAgo, now), true, 'Exactly 30 mins should expire');
+    assert.strictEqual(isSessionExpired(thirtyOneMinsAgo, now), true, '31 mins should expire');
+    assert.strictEqual(isSessionExpired(twoHoursAgo, now), true, '2 hours should expire');
+});
+
+test('Inactivity check keeps session valid when less than 30 minutes have passed', () => {
+    const now = Date.now();
+    const activeNow = now;
+    const tenMinsAgo = now - (10 * 60 * 1000);
+    const twentyNineMinsAgo = now - (29 * 60 * 1000 + 50 * 1000); // 29m 50s
+
+    assert.strictEqual(isSessionExpired(activeNow, now), false, 'Active now should be valid');
+    assert.strictEqual(isSessionExpired(tenMinsAgo, now), false, '10 mins ago should be valid');
+    assert.strictEqual(isSessionExpired(twentyNineMinsAgo, now), false, '29m 50s should be valid');
+});
+
+test('Inactivity check safely handles missing, invalid or zero timestamps', () => {
+    const now = Date.now();
+    assert.strictEqual(isSessionExpired(null, now), false);
+    assert.strictEqual(isSessionExpired(undefined, now), false);
+    assert.strictEqual(isSessionExpired(0, now), false);
+    assert.strictEqual(isSessionExpired(NaN, now), false);
+});
+
 console.log(`\n=================================================`);
 console.log(`Test Results: ${passed} Passed, ${failed} Failed`);
 console.log(`=================================================`);
 
 if (failed > 0) process.exit(1);
+

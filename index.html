@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
     <title>StockSense — Know Your Stock. Grow Your Business.</title>
     <meta name="description" content="StockSense is an intelligent inventory management platform for small businesses. Track stock, record sales, automate SKUs, and make smarter restocking decisions.">
     <link rel="stylesheet" href="styles.css">
@@ -36,11 +36,14 @@
         <!-- Sidebar Navigation -->
         <aside class="side" id="sidebar">
             <div class="brand">
-                <div class="logo">S</div>
-                <div>
-                    <b>Stock<span style="color:var(--green)">Sense</span></b>
-                    <small>Inventory intelligence</small>
+                <div class="brand-info">
+                    <div class="logo">S</div>
+                    <div>
+                        <b>Stock<span style="color:var(--green)">Sense</span></b>
+                        <small>Inventory intelligence</small>
+                    </div>
                 </div>
+                <button class="side-close-btn mobile" id="sidebar-close" type="button" aria-label="Close navigation drawer">✕</button>
             </div>
 
             <div>
@@ -95,13 +98,15 @@
         <!-- Main Workspace Area -->
         <main>
             <header class="top">
-                <div>
-                    <button class="btn secondary mobile" id="menu" aria-label="Open menu">☰</button>
-                    <div class="eyebrow" id="eyebrow">Your business at a glance</div>
-                    <h1 class="h1" id="title">Dashboard overview</h1>
-                    <p class="muted" id="subtitle">Know what you have. Know what needs attention.</p>
+                <div class="top-title-group">
+                    <button class="btn secondary mobile btn-menu" id="menu" aria-label="Open navigation menu">☰</button>
+                    <div class="top-heading-text">
+                        <div class="eyebrow" id="eyebrow">Your business at a glance</div>
+                        <h1 class="h1" id="title">Dashboard overview</h1>
+                        <p class="muted" id="subtitle">Know what you have. Know what needs attention.</p>
+                    </div>
                 </div>
-                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <div class="top-actions">
                     <span class="desktop muted" id="date"></span>
                     <button class="btn primary" id="add">＋ Add product</button>
                 </div>

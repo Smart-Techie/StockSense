@@ -116,6 +116,101 @@
     }
 
     // -------------------------------------------------------------------------
+    // Session Inactivity Tracking (30-minute auto sign-out)
+    // -------------------------------------------------------------------------
+    const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes in milliseconds
+    const INACTIVITY_STORAGE_KEY = 'stocksense_last_activity';
+    const INACTIVITY_LAST_EMAIL_KEY = 'stocksense_last_email';
+    let isSigningOutDueToTimeout = false;
+    let lastActivityThrottle = 0;
+
+    function getLastActivityTimestamp() {
+        try {
+            const val = localStorage.getItem(INACTIVITY_STORAGE_KEY);
+            return val ? parseInt(val, 10) : 0;
+        } catch {
+            return 0;
+        }
+    }
+
+    function recordUserActivity() {
+        if (!state.currentUser) return;
+        const now = Date.now();
+        try {
+            localStorage.setItem(INACTIVITY_STORAGE_KEY, String(now));
+        } catch {
+            // Ignore storage access errors
+        }
+    }
+
+    function onUserInteraction() {
+        if (!state.currentUser) return;
+        const now = Date.now();
+        // Throttle writing to localStorage to at most once every 10 seconds
+        if (now - lastActivityThrottle > 10000) {
+            lastActivityThrottle = now;
+            recordUserActivity();
+        }
+    }
+
+    async function triggerInactivitySignOut() {
+        if (isSigningOutDueToTimeout) return;
+        isSigningOutDueToTimeout = true;
+        console.warn('[StockSense] Session expired: 30 minutes of inactivity elapsed.');
+
+        const emailToPreserve = state.currentUser?.email || localStorage.getItem(INACTIVITY_LAST_EMAIL_KEY) || '';
+        if (emailToPreserve) {
+            try {
+                localStorage.setItem(INACTIVITY_LAST_EMAIL_KEY, emailToPreserve);
+            } catch {}
+        }
+
+        try {
+            localStorage.removeItem(INACTIVITY_STORAGE_KEY);
+        } catch {}
+
+        try {
+            await supabase.auth.signOut();
+        } catch (err) {
+            console.warn('Sign out during timeout:', err);
+        }
+
+        state.currentUser = null;
+        state.currentProfile = null;
+        state.currentRole = null;
+        state.products = [];
+        state.moves = [];
+
+        showAuthScreen(
+            'signin',
+            'Your session expired after 30 minutes of inactivity. Please sign in again to continue.',
+            'info'
+        );
+
+        setTimeout(() => {
+            const emailInput = $('signin-email');
+            if (emailInput && emailToPreserve) {
+                emailInput.value = emailToPreserve;
+                $('signin-password')?.focus();
+            }
+            isSigningOutDueToTimeout = false;
+        }, 80);
+    }
+
+    async function checkInactivityTimeout() {
+        if (!state.currentUser) return;
+        const last = getLastActivityTimestamp();
+        if (!last) {
+            recordUserActivity();
+            return;
+        }
+        const elapsed = Date.now() - last;
+        if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+            await triggerInactivitySignOut();
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Auth & Session Management
     // -------------------------------------------------------------------------
     async function initSession() {
@@ -186,6 +281,13 @@
         }
 
         if (data && data.session) {
+            // Check if user was inactive for >= 30 minutes before returning to browser
+            const last = getLastActivityTimestamp();
+            if (last && (Date.now() - last) >= INACTIVITY_TIMEOUT_MS) {
+                await triggerInactivitySignOut();
+                return;
+            }
+            recordUserActivity();
             await handleAuthenticatedSession(data.session.user);
         } else {
             showAuthScreen('signin');
@@ -194,6 +296,12 @@
 
     async function handleAuthenticatedSession(user) {
         state.currentUser = user;
+        recordUserActivity();
+        if (user.email) {
+            try {
+                localStorage.setItem(INACTIVITY_LAST_EMAIL_KEY, user.email);
+            } catch {}
+        }
 
         // Fetch or create profile & check suspension
         const profile = await fetchOrCreateProfile(user);
@@ -2258,7 +2366,7 @@
     $('export').onclick = exportMovementsCSV;
     $('exportInventory').onclick = exportInventoryCSV;
 
-    // Mobile drawer
+    // Mobile drawer controls
     $('menu').onclick = () => {
         $('sidebar').classList.add('open');
         $('sidebar-overlay').classList.add('active');
@@ -2267,6 +2375,22 @@
         $('sidebar').classList.remove('open');
         $('sidebar-overlay').classList.remove('active');
     };
+    const sideCloseBtn = $('sidebar-close');
+    if (sideCloseBtn) {
+        sideCloseBtn.onclick = () => {
+            $('sidebar').classList.remove('open');
+            $('sidebar-overlay').classList.remove('active');
+        };
+    }
+
+    // Close mobile drawer and modals with Escape key
+    window.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            $('sidebar')?.classList.remove('open');
+            $('sidebar-overlay')?.classList.remove('active');
+            closeModal();
+        }
+    });
 
     // Live search & filters
     $('search').oninput = renderProducts;
@@ -2283,6 +2407,7 @@
     $('btn-signout').onclick = async () => {
         const confirmed = window.confirm("Are you sure you want to sign out of StockSense?");
         if (!confirmed) return;
+        try { localStorage.removeItem(INACTIVITY_STORAGE_KEY); } catch {}
         await supabase.auth.signOut();
         state.currentUser = null;
         state.currentProfile = null;
@@ -2291,6 +2416,22 @@
         state.moves = [];
         showAuthScreen('signin', 'You have been signed out safely.', 'info');
     };
+
+    // User interaction listeners for 30-minute inactivity timeout
+    ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'].forEach(evt => {
+        window.addEventListener(evt, onUserInteraction, { passive: true });
+    });
+
+    // Check inactivity every 15 seconds
+    setInterval(checkInactivityTimeout, 15000);
+
+    // Check inactivity on visibility change (switching tabs) and window focus
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            checkInactivityTimeout();
+        }
+    });
+    window.addEventListener('focus', checkInactivityTimeout);
 
     // Admin controls
     $('admin-user-search').oninput = () => {
@@ -2341,6 +2482,7 @@
 
     // Auth state changes
     supabase.auth.onAuthStateChange((event, session) => {
+        if (isSigningOutDueToTimeout) return;
         if (event === 'SIGNED_OUT' || !session) {
             state.currentUser = null;
             state.currentProfile = null;
@@ -2349,6 +2491,7 @@
             state.moves = [];
             showAuthScreen('signin');
         } else if (event === 'SIGNED_IN' && session.user && !state.currentUser) {
+            recordUserActivity();
             handleAuthenticatedSession(session.user);
         }
     });
