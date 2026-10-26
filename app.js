@@ -2484,6 +2484,8 @@
     // Auth state changes
     supabase.auth.onAuthStateChange((event, session) => {
         if (isSigningOutDueToTimeout) return;
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isLocalhost && new URLSearchParams(window.location.search).get('preview')) return;
         if (event === 'SIGNED_OUT' || !session) {
             state.currentUser = null;
             state.currentProfile = null;
