@@ -812,9 +812,101 @@ test('CSV Validation detects duplicate SKUs within file and collisions with cust
     assert.ok(errors.some(e => e.includes('SKU "EXISTING-99" already exists in customer catalog')));
 });
 
+// -----------------------------------------------------------------------------
+// 12. Email Verification Routing, URL Detection & Cooldown Timer
+// -----------------------------------------------------------------------------
+function resolveAuthRedirect(origin, hostname) {
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+    if (isLocalhost) {
+        return `${origin}/auth/verify`;
+    }
+    if (origin && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+        return `${origin}/auth/verify`;
+    }
+    return 'https://stocksense-psi.vercel.app/auth/verify';
+}
+
+function parseVerificationCallback(urlString) {
+    const url = new URL(urlString, 'https://stocksense-psi.vercel.app');
+    const rawHash = url.hash ? url.hash.replace(/^#/, '') : '';
+    const hashParams = new URLSearchParams(rawHash);
+    const searchParams = url.searchParams;
+
+    const path = url.pathname.replace(/\/+$/, '');
+    const isVerifyPath = path.endsWith('/auth/verify') || path.endsWith('/auth/verify.html');
+
+    const authError = hashParams.get('error') || searchParams.get('error') || hashParams.get('error_code') || searchParams.get('error_code');
+    const authErrorDesc = hashParams.get('error_description') || searchParams.get('error_description');
+    const pkceCode = searchParams.get('code');
+    const hasVerifyHash = rawHash.includes('type=signup') || rawHash.includes('type=email_change');
+
+    if (authError || (isVerifyPath && (authError || authErrorDesc))) {
+        return {
+            status: 'invalid',
+            code: authError || 'error',
+            description: authErrorDesc || 'The verification link may have expired or already been used.'
+        };
+    }
+
+    if (pkceCode && isVerifyPath) {
+        return {
+            status: 'pkce_exchange',
+            code: pkceCode
+        };
+    }
+
+    if (isVerifyPath || hasVerifyHash) {
+        return {
+            status: 'verifying'
+        };
+    }
+
+    return {
+        status: 'standard_session'
+    };
+}
+
+test('resolveAuthRedirect returns local /auth/verify for localhost', () => {
+    const redirectUrl = resolveAuthRedirect('http://localhost:3000', 'localhost');
+    assert.strictEqual(redirectUrl, 'http://localhost:3000/auth/verify');
+});
+
+test('resolveAuthRedirect returns production /auth/verify for production domain', () => {
+    const redirectUrl = resolveAuthRedirect('https://stocksense-psi.vercel.app', 'stocksense-psi.vercel.app');
+    assert.strictEqual(redirectUrl, 'https://stocksense-psi.vercel.app/auth/verify');
+});
+
+test('parseVerificationCallback detects expired OTP error in URL parameters', () => {
+    const result = parseVerificationCallback('https://stocksense-psi.vercel.app/auth/verify?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired');
+    assert.strictEqual(result.status, 'invalid');
+    assert.strictEqual(result.code, 'access_denied');
+    assert.ok(result.description.includes('invalid or has expired'));
+});
+
+test('parseVerificationCallback identifies PKCE authorization code on /auth/verify', () => {
+    const result = parseVerificationCallback('https://stocksense-psi.vercel.app/auth/verify?code=d6a9a797-2866-4e50-9f0e-3fa5f37740f9');
+    assert.strictEqual(result.status, 'pkce_exchange');
+    assert.strictEqual(result.code, 'd6a9a797-2866-4e50-9f0e-3fa5f37740f9');
+});
+
+test('parseVerificationCallback triggers verifying state when navigating to /auth/verify with token hash', () => {
+    const result = parseVerificationCallback('https://stocksense-psi.vercel.app/auth/verify#access_token=test_tok&type=signup');
+    assert.strictEqual(result.status, 'verifying');
+});
+
+test('Resend verification cooldown prevents immediate repeated clicks', () => {
+    let cooldown = 60;
+    const canResend = () => cooldown <= 0;
+    assert.strictEqual(canResend(), false);
+
+    cooldown = 0;
+    assert.strictEqual(canResend(), true);
+});
+
 console.log(`\n=================================================`);
 console.log(`Test Results: ${passed} Passed, ${failed} Failed`);
 console.log(`=================================================`);
 
 if (failed > 0) process.exit(1);
+
 

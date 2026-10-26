@@ -2620,3 +2620,103 @@ tr:hover td {
     flex-wrap: wrap;
 }
 
+/* --------------------------------------------------------------------------
+   Email Verification Screen Styles
+   -------------------------------------------------------------------------- */
+.verify-screen-box {
+    text-align: center;
+    padding: 10px 0 16px;
+}
+
+.verify-icon-circle {
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    margin: 0 auto 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+    font-weight: 800;
+    transition: transform 0.2s ease;
+}
+
+.verify-icon-circle.success {
+    background: radial-gradient(circle at center, rgba(16, 185, 129, 0.25) 0%, rgba(16, 185, 129, 0.08) 70%);
+    border: 2px solid var(--green);
+    color: var(--green);
+    box-shadow: 0 0 28px rgba(16, 185, 129, 0.4);
+}
+
+.verify-icon-circle.error {
+    background: radial-gradient(circle at center, rgba(239, 68, 68, 0.25) 0%, rgba(239, 68, 68, 0.08) 70%);
+    border: 2px solid #ef4444;
+    color: #ef4444;
+    box-shadow: 0 0 28px rgba(239, 68, 68, 0.35);
+}
+
+.verify-icon-circle.loading {
+    background: radial-gradient(circle at center, rgba(168, 85, 247, 0.25) 0%, rgba(168, 85, 247, 0.08) 70%);
+    border: 2px solid var(--lav);
+    color: #fff;
+    box-shadow: 0 0 28px rgba(168, 85, 247, 0.35);
+}
+
+.verify-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(168, 85, 247, 0.25);
+    border-top-color: var(--green);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+}
+
+.verify-heading {
+    font-size: 21px;
+    font-weight: 800;
+    color: #fff;
+    margin: 0 0 10px;
+    letter-spacing: -0.3px;
+}
+
+.verify-message {
+    color: var(--lav);
+    font-size: 13.5px;
+    line-height: 1.6;
+    margin: 0 0 22px;
+    padding: 0 6px;
+}
+
+.verify-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+.verify-actions .btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 13.5px;
+    justify-content: center;
+}
+
+.verify-actions a {
+    display: inline-block;
+    color: var(--lav);
+    font-size: 12.5px;
+    cursor: pointer;
+    text-decoration: none;
+    margin-top: 6px;
+    transition: color 0.2s ease;
+}
+
+.verify-actions a:hover {
+    color: #fff;
+    text-decoration: underline;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+

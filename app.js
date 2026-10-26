@@ -221,6 +221,17 @@
     // -------------------------------------------------------------------------
     // Auth & Session Management
     // -------------------------------------------------------------------------
+    function getAuthRedirectUrl() {
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isLocalhost) {
+            return `${window.location.origin}/auth/verify`;
+        }
+        if (window.location.origin && !window.location.origin.includes('localhost') && !window.location.origin.includes('127.0.0.1')) {
+            return `${window.location.origin}/auth/verify`;
+        }
+        return 'https://stocksense-psi.vercel.app/auth/verify';
+    }
+
     async function initSession() {
         showAuthScreen('loading');
 
@@ -300,10 +311,74 @@
             return;
         }
 
+        // 1. Inspect URL parameters and fragments for verification callback or auth errors
+        const rawHash = window.location.hash || '';
+        const hashParams = new URLSearchParams(rawHash.replace(/^#/, ''));
+        const path = window.location.pathname.replace(/\/+$/, '');
+        const isVerifyPath = path.endsWith('/auth/verify') || path.endsWith('/auth/verify.html');
+        const hasVerifyHash = rawHash.includes('type=signup') || rawHash.includes('type=email_change');
+        const hasVerifyQuery = urlParams.get('type') === 'signup' || urlParams.get('type') === 'email_change';
+
+        // Check for error parameters in hash or query (e.g. otp_expired, access_denied, invalid token)
+        const authError = hashParams.get('error') || urlParams.get('error') || hashParams.get('error_code') || urlParams.get('error_code');
+        const authErrorDesc = hashParams.get('error_description') || urlParams.get('error_description');
+
+        if (authError || (isVerifyPath && (authError || authErrorDesc))) {
+            showAuthScreen('verify-invalid', {
+                code: authError,
+                description: authErrorDesc || 'The verification link may have expired or already been used.'
+            });
+            try {
+                history.replaceState(null, '', isVerifyPath ? '/auth/verify' : '/');
+            } catch {}
+            return;
+        }
+
+        // Check for PKCE exchange code (?code=...)
+        const pkceCode = urlParams.get('code');
+        if (pkceCode && (isVerifyPath || hasVerifyQuery)) {
+            showAuthScreen('verifying');
+            try {
+                const { data, error } = await supabase.auth.exchangeCodeForSession(pkceCode);
+                if (error) {
+                    showAuthScreen('verify-invalid', { code: error.code || 'code_exchange_failed', description: error.message });
+                } else if (data && data.session && data.session.user) {
+                    showAuthScreen('verify-success', data.session.user);
+                } else {
+                    showAuthScreen('verify-invalid', { description: 'Could not establish verified session.' });
+                }
+            } catch (err) {
+                showAuthScreen('verify-invalid', { description: err.message });
+            }
+            try {
+                history.replaceState(null, '', isVerifyPath ? '/auth/verify' : '/');
+            } catch {}
+            return;
+        }
+
         // Check for password recovery hash in URL
-        const hash = window.location.hash;
-        if (hash && hash.includes('type=recovery')) {
+        if (rawHash && rawHash.includes('type=recovery')) {
             showAuthScreen('recovery');
+            return;
+        }
+
+        // Check for email verification via hash or verify route
+        if (isVerifyPath || hasVerifyHash) {
+            showAuthScreen('verifying');
+            // Give client brief moment to parse hash tokens if present
+            await new Promise(r => setTimeout(r, 450));
+            const { data, error } = await supabase.auth.getSession();
+            if (error) {
+                showAuthScreen('verify-invalid', { description: error.message });
+            } else if (data && data.session && data.session.user) {
+                showAuthScreen('verify-success', data.session.user);
+            } else {
+                // If on /auth/verify without active session or tokens
+                showAuthScreen('verify-invalid', { description: 'The verification link may have expired or already been used.' });
+            }
+            try {
+                history.replaceState(null, '', isVerifyPath ? '/auth/verify' : '/');
+            } catch {}
             return;
         }
 
@@ -500,6 +575,85 @@
             return;
         }
 
+        if (view === 'verifying') {
+            container.innerHTML = `
+                <div class="verify-screen-box">
+                    <div class="verify-icon-circle loading">
+                        <div class="verify-spinner"></div>
+                    </div>
+                    <h3 class="verify-heading">Verifying Your Email Address…</h3>
+                    <p class="verify-message">Please wait while we confirm your StockSense verification link with our secure authentication servers.</p>
+                </div>
+            `;
+            return;
+        }
+
+        if (view === 'verify-success') {
+            const user = typeof message === 'object' && message ? message : state.currentUser;
+            const hasSession = !!user;
+            container.innerHTML = `
+                <div class="verify-screen-box">
+                    <div class="verify-icon-circle success">✓</div>
+                    <h3 class="verify-heading">Email Verified Successfully!</h3>
+                    <p class="verify-message">Your email address has been verified. Your StockSense account is ready for you to sign in.</p>
+                    <div class="verify-actions">
+                        ${hasSession ? `
+                            <button class="btn greenbtn" id="btn-verify-continue">Continue to StockSense Dashboard →</button>
+                            <button class="btn primary" id="btn-verify-signin">Sign In to StockSense</button>
+                        ` : `
+                            <button class="btn greenbtn" id="btn-verify-signin">Sign In to StockSense</button>
+                        `}
+                        <div>
+                            <a id="btn-verify-home" href="/">Return to Home</a>
+                        </div>
+                    </div>
+                </div>
+            `;
+            if ($('btn-verify-continue')) {
+                $('btn-verify-continue').onclick = async () => {
+                    await handleAuthenticatedSession(user);
+                };
+            }
+            if ($('btn-verify-signin')) {
+                $('btn-verify-signin').onclick = () => {
+                    showAuthScreen('signin');
+                };
+            }
+            if ($('btn-verify-home')) {
+                $('btn-verify-home').onclick = (e) => {
+                    e.preventDefault();
+                    showAuthScreen('signin');
+                    try { history.pushState(null, '', '/'); } catch {}
+                };
+            }
+            return;
+        }
+
+        if (view === 'verify-invalid') {
+            container.innerHTML = `
+                <div class="verify-screen-box">
+                    <div class="verify-icon-circle error">✕</div>
+                    <h3 class="verify-heading">This Verification Link Is Invalid or Expired</h3>
+                    <p class="verify-message">The link may have expired or already been used. You can return to StockSense and request a new verification email if needed.</p>
+                    <div class="verify-actions">
+                        <button class="btn greenbtn" id="btn-invalid-resend">Resend Verification Email</button>
+                        <button class="btn primary" id="btn-invalid-signin">Sign In to StockSense</button>
+                        <div>
+                            <a id="btn-invalid-home" href="/">Return to Home</a>
+                        </div>
+                    </div>
+                </div>
+            `;
+            $('btn-invalid-resend').onclick = () => showAuthScreen('resend');
+            $('btn-invalid-signin').onclick = () => showAuthScreen('signin');
+            $('btn-invalid-home').onclick = (e) => {
+                e.preventDefault();
+                showAuthScreen('signin');
+                try { history.pushState(null, '', '/'); } catch {}
+            };
+            return;
+        }
+
         if (view === 'signin') {
             container.innerHTML = `
                 <div class="auth-tabs">
@@ -639,7 +793,8 @@
                     email,
                     password,
                     options: {
-                        data: { full_name: fullName }
+                        data: { full_name: fullName },
+                        emailRedirectTo: getAuthRedirectUrl()
                     }
                 });
 
@@ -669,22 +824,73 @@
         }
 
         if (view === 'check-email') {
-            const email = message || 'your email address';
+            const email = typeof message === 'string' ? message : '';
             container.innerHTML = `
-                <div style="text-align:center;padding:20px 0">
-                    <div style="font-size:48px;margin-bottom:12px">✉️</div>
-                    <h3 style="margin:0 0 8px;font-size:20px">Check your email</h3>
-                    <p style="color:#c4b8d3;font-size:13px;line-height:1.5;margin-bottom:20px">
-                        We have sent an activation link to <b style="color:#fff">${esc(email)}</b>. 
-                        Please click the link in your email to confirm your account and access your inventory.
+                <div class="verify-screen-box">
+                    <div class="verify-icon-circle" style="background:rgba(168,85,247,0.15);border:2px solid var(--lav);color:var(--lav);box-shadow:0 0 24px rgba(168,85,247,0.25)">✉️</div>
+                    <h3 class="verify-heading">Check Your Email</h3>
+                    <p class="verify-message">
+                        We've sent a verification link to ${email ? `<b style="color:#fff">${esc(email)}</b>` : 'your email address'}. Open the email and click the verification button to activate your StockSense account.
                     </p>
-                    <div class="auth-notice info" style="text-align:left">
-                        <b>Next step:</b> Check your inbox (and spam/promotions folder). Once confirmed, sign in below.
+                    <div class="auth-notice info" style="text-align:left;margin-bottom:18px">
+                        <b>Next step:</b> Check your inbox and spam folder. Click the verification button in the email to activate your account.
                     </div>
-                    <button class="btn primary" id="btn-back-to-signin" style="width:100%;margin-top:10px">Proceed to Sign In →</button>
+                    <div class="verify-actions">
+                        ${email ? `<button class="btn secondary" id="btn-checkemail-resend" type="button">Resend Verification Email</button>` : ''}
+                        <button class="btn primary" id="btn-checkemail-signin" type="button">Return to Sign In</button>
+                    </div>
                 </div>
             `;
-            $('btn-back-to-signin').onclick = () => showAuthScreen('signin');
+            $('btn-checkemail-signin').onclick = () => showAuthScreen('signin');
+
+            if (email && $('btn-checkemail-resend')) {
+                const resendBtn = $('btn-checkemail-resend');
+                let cooldown = 0;
+                let cooldownTimer = null;
+
+                resendBtn.onclick = async () => {
+                    if (cooldown > 0) return;
+                    resendBtn.disabled = true;
+                    resendBtn.textContent = 'Sending...';
+
+                    try {
+                        const { error } = await supabase.auth.resend({
+                            type: 'signup',
+                            email: email,
+                            options: {
+                                emailRedirectTo: getAuthRedirectUrl()
+                            }
+                        });
+
+                        if (error) {
+                            resendBtn.disabled = false;
+                            resendBtn.textContent = 'Resend Verification Email';
+                            notify(error.message || 'Could not resend verification email.', 'error');
+                            return;
+                        }
+
+                        notify(`A fresh verification email has been sent to ${email}.`, 'success');
+                        cooldown = 60;
+                        resendBtn.disabled = true;
+                        resendBtn.textContent = `Resend in ${cooldown}s`;
+
+                        cooldownTimer = setInterval(() => {
+                            cooldown--;
+                            if (cooldown <= 0) {
+                                clearInterval(cooldownTimer);
+                                resendBtn.disabled = false;
+                                resendBtn.textContent = 'Resend Verification Email';
+                            } else {
+                                resendBtn.textContent = `Resend in ${cooldown}s`;
+                            }
+                        }, 1000);
+                    } catch (err) {
+                        resendBtn.disabled = false;
+                        resendBtn.textContent = 'Resend Verification Email';
+                        notify('Error resending email. Please try again.', 'error');
+                    }
+                };
+            }
             return;
         }
 
@@ -753,7 +959,10 @@
 
                 const { error } = await supabase.auth.resend({
                     type: 'signup',
-                    email
+                    email,
+                    options: {
+                        emailRedirectTo: getAuthRedirectUrl()
+                    }
                 });
 
                 if (error) {
@@ -3809,7 +4018,9 @@
             validateCsvRows,
             searchBulkCustomer,
             selectBulkCustomer,
-            executeBulkProductImport
+            executeBulkProductImport,
+            getAuthRedirectUrl,
+            showAuthScreen
         };
     }
 

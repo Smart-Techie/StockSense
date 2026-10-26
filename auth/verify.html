@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+    <title>Verify Email | StockSense — Know Your Stock. Grow Your Business.</title>
+    <meta name="description" content="Verify your StockSense account email to start tracking inventory, sales, and restocking.">
+    <meta name="theme-color" content="#0c0a10">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+
+    <!-- Authentication Screen (Sign In, Sign Up, Check Email, Verification, Recovery) -->
+    <div id="auth-screen">
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="auth-brand">
+                    <div class="logo" style="width:36px;height:36px;font-size:18px">S</div>
+                    <span>Stock<span style="color:var(--green)">Sense</span></span>
+                </div>
+                <p class="auth-subtitle">Know Your Stock. Grow Your Business.</p>
+            </div>
+            <div id="auth-card-body">
+                <div class="verify-screen-box">
+                    <div class="verify-icon-circle loading">
+                        <div class="verify-spinner"></div>
+                    </div>
+                    <h3 class="verify-heading">Verifying Your Email Address…</h3>
+                    <p class="verify-message">Please wait a moment while we confirm your StockSense account credentials.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Navigation Drawer Overlay -->
+    <div id="sidebar-overlay" class="side-overlay"></div>
+
+    <!-- Authenticated StockSense Application Container (Hidden on auth screen) -->
+    <div class="app" id="app-root" style="display:none"></div>
+
+    <!-- Dynamic Modal & Toast Targets -->
+    <div id="modal"></div>
+    <div id="toast" aria-live="polite"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/supabase-config.js"></script>
+    <script src="/app.js"></script>
+
+</body>
+
+</html>

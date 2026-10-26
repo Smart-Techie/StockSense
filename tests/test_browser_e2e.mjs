@@ -511,6 +511,69 @@ async function runBrowserTests() {
             assert(!overflow.hasOverflow, `Viewport ${w}px on #page-dashboard has NO horizontal overflow (scrollWidth=${overflow.scrollWidth}, innerWidth=${w})`);
         }
 
+        // =========================================================================
+        // 13. Brand Authentication & Verification Flow E2E Tests
+        // =========================================================================
+        console.log('\n--- Test Suite 13: Email Verification and Auth Screens ---');
+
+        // Test getAuthRedirectUrl
+        const authRedirectUrl = await evaluate(`window.StockSense.getAuthRedirectUrl()`);
+        assert(authRedirectUrl.includes('/auth/verify'), `getAuthRedirectUrl returns valid verification endpoint: ${authRedirectUrl}`);
+
+        // Test verifying screen
+        await evaluate(`window.StockSense.showAuthScreen('verifying')`);
+        await sleep(100);
+        const verifyingHeading = await evaluate(`document.querySelector('.verify-heading')?.textContent`);
+        assert(verifyingHeading && verifyingHeading.includes('Verifying Your Email Address'), `Verifying screen heading is present: ${verifyingHeading}`);
+
+        // Test verify-success screen
+        await evaluate(`window.StockSense.showAuthScreen('verify-success')`);
+        await sleep(100);
+        const successHeading = await evaluate(`document.querySelector('.verify-heading')?.textContent`);
+        assert(successHeading && successHeading.includes('Email Verified Successfully!'), `Success screen heading is correct: ${successHeading}`);
+        const successMsg = await evaluate(`document.querySelector('.verify-message')?.textContent`);
+        assert(successMsg && successMsg.includes('Your email address has been verified'), `Success message is present: ${successMsg}`);
+        const signinBtn = await evaluate(`document.querySelector('#btn-verify-signin')?.textContent`);
+        assert(signinBtn && signinBtn.includes('Sign In to StockSense'), `Sign In to StockSense button is rendered`);
+
+        // Test verify-invalid screen
+        await evaluate(`window.StockSense.showAuthScreen('verify-invalid')`);
+        await sleep(100);
+        const invalidHeading = await evaluate(`document.querySelector('.verify-heading')?.textContent`);
+        assert(invalidHeading && invalidHeading.includes('This Verification Link Is Invalid or Expired'), `Invalid screen heading is correct: ${invalidHeading}`);
+        const resendBtn = await evaluate(`document.querySelector('#btn-invalid-resend')?.textContent`);
+        assert(resendBtn && resendBtn.includes('Resend Verification Email'), `Resend button is rendered on invalid screen`);
+
+        // Test check-email screen with resend cooldown
+        await evaluate(`window.StockSense.showAuthScreen('check-email', 'business@stocksense.app')`);
+        await sleep(100);
+        const checkEmailHeading = await evaluate(`document.querySelector('.verify-heading')?.textContent`);
+        assert(checkEmailHeading && checkEmailHeading.includes('Check Your Email'), `Check Email screen heading is correct: ${checkEmailHeading}`);
+        const emailTag = await evaluate(`document.querySelector('.verify-message b')?.textContent`);
+        assert(emailTag === 'business@stocksense.app', `Target email is formatted inside message`);
+        const checkResendBtn = await evaluate(`document.querySelector('#btn-checkemail-resend')?.textContent`);
+        assert(checkResendBtn && checkResendBtn.includes('Resend Verification Email'), `Resend button is available on Check Email screen`);
+
+        // Test /auth/verify screen responsiveness across mobile and desktop
+        for (const w of viewports) {
+            await send('Emulation.setDeviceMetricsOverride', {
+                width: w,
+                height: 800,
+                deviceScaleFactor: 1,
+                mobile: w < 768
+            });
+            await sleep(100);
+            const overflow = await evaluate(`(() => {
+                const docEl = document.documentElement;
+                return {
+                    scrollWidth: docEl.scrollWidth,
+                    clientWidth: docEl.clientWidth,
+                    hasOverflow: docEl.scrollWidth > window.innerWidth
+                };
+            })()`);
+            assert(!overflow.hasOverflow, `Viewport ${w}px on auth verify screen has NO horizontal overflow (scrollWidth=${overflow.scrollWidth}, innerWidth=${w})`);
+        }
+
         console.log('\n=================================================');
         console.log(`End-to-End Test Results: ${passCount} Passed, ${failCount} Failed`);
         console.log('=================================================');

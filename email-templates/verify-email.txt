@@ -1,0 +1,10 @@
+Welcome to StockSense!
+
+Thank you for creating your StockSense account. Before you get started, please verify your email address by visiting the link below:
+
+{{ .ConfirmationURL }}
+
+If you did not create a StockSense account, you can safely ignore this email.
+
+StockSense — Know Your Stock. Grow Your Business.
+https://stocksense-psi.vercel.app
