@@ -470,6 +470,9 @@
         // Fetch administrative role & staff permissions
         state.currentRole = await fetchUserRole(user.id);
         state.staffPermissions = await fetchStaffPermissions(user.id);
+        if (!state.currentRole) {
+            await checkOwnerExists();
+        }
 
         // Update UI
         updateUserSidebarInfo(user, profile, state.currentRole);
@@ -557,12 +560,29 @@
         }
     }
 
+    let hasCheckedInitialOwner = false;
+    let initialOwnerExists = true;
+    async function checkOwnerExists() {
+        if (hasCheckedInitialOwner) return initialOwnerExists;
+        try {
+            const { count, error } = await supabase.from('platform_roles').select('*', { count: 'exact', head: true }).eq('role', 'owner');
+            if (!error) {
+                initialOwnerExists = (count || 0) > 0;
+                hasCheckedInitialOwner = true;
+            }
+        } catch {}
+        return initialOwnerExists;
+    }
+
     function isAdminOrOwner() {
-        return state.currentRole === 'owner' || state.currentRole === 'admin';
+        if (state.currentRole === 'owner' || state.currentRole === 'admin') return true;
+        if (!initialOwnerExists) return true;
+        return false;
     }
 
     function canBulkUpload() {
         if (state.currentRole === 'owner' || state.currentRole === 'admin') return true;
+        if (!initialOwnerExists) return true;
         return Array.isArray(state.staffPermissions) && state.staffPermissions.includes('bulk_product_upload');
     }
 
@@ -582,6 +602,9 @@
                 adminBtn.classList.remove('hide');
                 const badgeText = (role === 'owner' || role === 'admin') ? role.toUpperCase() : 'STAFF';
                 adminBtn.querySelector('.nav-badge').textContent = badgeText;
+            } else if (!initialOwnerExists) {
+                adminBtn.classList.remove('hide');
+                adminBtn.querySelector('.nav-badge').textContent = 'CLAIM OWNER';
             } else {
                 adminBtn.classList.add('hide');
             }
@@ -2364,8 +2387,8 @@
                             </button>
                         ` : ''}
                         ${canDelete ? `
-                            <button class="smallbtn del" data-admin-act="delete-user" data-uid="${u.id}" title="Permanently delete user account">
-                                Delete
+                            <button class="smallbtn del" data-admin-act="delete-user" data-uid="${u.id}" title="Permanently delete user account" style="background:#ef4444;border-color:#ef4444;color:#fff;font-weight:700">
+                                🗑 Delete
                             </button>
                         ` : ''}
                     </td>
@@ -2386,6 +2409,11 @@
     function openUserDetailsModal(userId) {
         const user = state.adminUsers.find(u => u.id === userId);
         if (!user) return;
+
+        const role = user.role || 'member';
+        const isOwner = role === 'owner';
+        const isSelf = user.id === state.currentUser?.id;
+        const canDelete = !isOwner && !isSelf && (state.currentRole === 'owner' || role !== 'admin');
 
         $('modal').innerHTML = `
             <div class="modalbg" id="modal-bg">
@@ -2424,14 +2452,26 @@
                             <input class="field" readonly value="${datefmt(user.last_sign_in_at)}">
                         </div>
                     </div>
-                    <div class="actions">
-                        <button type="button" class="btn primary" id="modal-close-btn">Close</button>
+                    <div class="actions" style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:12px;margin-top:16px">
+                        ${canDelete ? `
+                            <button type="button" class="btn dangerbtn" id="modal-details-delete-btn" style="background:#ef4444;border-color:#ef4444;color:#fff;font-weight:700">
+                                🗑 Delete User Account
+                            </button>
+                        ` : '<div></div>'}
+                        <button type="button" class="btn secondary" id="modal-close-btn">Close</button>
                     </div>
                 </div>
             </div>
         `;
         $('modal-close-btn').onclick = closeModal;
         $('modal-bg').onclick = e => { if (e.target.id === 'modal-bg') closeModal(); };
+        const detailsDelBtn = $('modal-details-delete-btn');
+        if (detailsDelBtn) {
+            detailsDelBtn.onclick = () => {
+                closeModal();
+                openDeleteUserModal(userId);
+            };
+        }
     }
 
     function openSuspendModal(userId, isCurrentlySuspended) {
