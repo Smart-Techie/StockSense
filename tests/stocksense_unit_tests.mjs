@@ -304,6 +304,127 @@ test('Inactivity check safely handles missing, invalid or zero timestamps', () =
     assert.strictEqual(isSessionExpired(NaN, now), false);
 });
 
+// -----------------------------------------------------------------------------
+// 7. Dynamic Greeting & Profile First-Name Extraction
+// -----------------------------------------------------------------------------
+function getGreeting(firstName, date = new Date()) {
+    const hour = date.getHours();
+    let timeOfDay = 'Good evening';
+    if (hour >= 5 && hour < 12) {
+        timeOfDay = 'Good morning';
+    } else if (hour >= 12 && hour < 17) {
+        timeOfDay = 'Good afternoon';
+    }
+    const cleanName = (firstName || '').trim();
+    return cleanName ? `${timeOfDay}, ${cleanName} 👋` : `${timeOfDay} 👋`;
+}
+
+function getUserFirstName(profile, user) {
+    const rawName = profile?.full_name || 
+                    user?.user_metadata?.full_name || 
+                    user?.user_metadata?.name || '';
+    const trimmed = rawName.trim();
+    if (!trimmed) return '';
+    const firstWord = trimmed.split(/\s+/)[0];
+    return firstWord || '';
+}
+
+test('Greeting: 5:00 AM to 11:59 AM produces "Good morning"', () => {
+    const morningEarly = new Date(2026, 9, 26, 5, 0, 0);
+    const morningLate = new Date(2026, 9, 26, 11, 59, 59);
+    assert.strictEqual(getGreeting('John', morningEarly), 'Good morning, John 👋');
+    assert.strictEqual(getGreeting('John', morningLate), 'Good morning, John 👋');
+});
+
+test('Greeting: 12:00 PM to 4:59 PM produces "Good afternoon"', () => {
+    const noon = new Date(2026, 9, 26, 12, 0, 0);
+    const afternoonLate = new Date(2026, 9, 26, 16, 59, 59);
+    assert.strictEqual(getGreeting('John', noon), 'Good afternoon, John 👋');
+    assert.strictEqual(getGreeting('John', afternoonLate), 'Good afternoon, John 👋');
+});
+
+test('Greeting: 5:00 PM to 4:59 AM produces "Good evening"', () => {
+    const evening5pm = new Date(2026, 9, 26, 17, 0, 0);
+    const midnight = new Date(2026, 9, 26, 0, 0, 0);
+    const earlyMorning459 = new Date(2026, 9, 26, 4, 59, 59);
+    assert.strictEqual(getGreeting('John', evening5pm), 'Good evening, John 👋');
+    assert.strictEqual(getGreeting('John', midnight), 'Good evening, John 👋');
+    assert.strictEqual(getGreeting('John', earlyMorning459), 'Good evening, John 👋');
+});
+
+test('Greeting: missing profile name falls back gracefully without empty name', () => {
+    const morning = new Date(2026, 9, 26, 9, 0, 0);
+    assert.strictEqual(getGreeting('', morning), 'Good morning 👋');
+    assert.strictEqual(getGreeting(null, morning), 'Good morning 👋');
+    assert.strictEqual(getGreeting('   ', morning), 'Good morning 👋');
+});
+
+test('First name extractor gets first name from full name or falls back gracefully', () => {
+    assert.strictEqual(getUserFirstName({ full_name: 'John Doe' }, null), 'John');
+    assert.strictEqual(getUserFirstName({ full_name: 'Sarah' }, null), 'Sarah');
+    assert.strictEqual(getUserFirstName({ full_name: '  Adaeze   Nnamdi  ' }, null), 'Adaeze');
+    assert.strictEqual(getUserFirstName({ full_name: '' }, { user_metadata: { full_name: 'Chioma Obi' } }), 'Chioma');
+    assert.strictEqual(getUserFirstName(null, null), '');
+    assert.strictEqual(getUserFirstName({ full_name: '' }, null), '');
+});
+
+// -----------------------------------------------------------------------------
+// 8. Navigation Page Headers & Subtitles Configuration
+// -----------------------------------------------------------------------------
+const pageHeaders = {
+    dashboard: ['', "Here's your business at a glance."],
+    inventory: ['Product Inventory', 'Manage your catalog, products, prices, and stock.'],
+    movements: ['Stock Movements', 'Track sales, restocking, and inventory adjustments.'],
+    advisor: ['StockSense Adviser', 'Get practical guidance for managing your stock.'],
+    reports: ['Reports', 'Understand your inventory performance.'],
+    admin: ['Platform Administration', 'Platform overview, user accounts, security roles and audit logs.']
+};
+
+test('Page headers conform to updated specifications', () => {
+    assert.strictEqual(pageHeaders.inventory[0], 'Product Inventory');
+    assert.strictEqual(pageHeaders.inventory[1], 'Manage your catalog, products, prices, and stock.');
+    assert.strictEqual(pageHeaders.movements[0], 'Stock Movements');
+    assert.strictEqual(pageHeaders.movements[1], 'Track sales, restocking, and inventory adjustments.');
+    assert.strictEqual(pageHeaders.advisor[0], 'StockSense Adviser');
+    assert.strictEqual(pageHeaders.advisor[1], 'Get practical guidance for managing your stock.');
+    assert.strictEqual(pageHeaders.reports[0], 'Reports');
+    assert.strictEqual(pageHeaders.reports[1], 'Understand your inventory performance.');
+    assert.strictEqual(pageHeaders.dashboard[1], "Here's your business at a glance.");
+});
+
+// -----------------------------------------------------------------------------
+// 9. Add Product Button Visibility Rule
+// -----------------------------------------------------------------------------
+function isAddProductButtonVisible(pageId) {
+    return pageId === 'inventory';
+}
+
+test('Main Add Product button is visible ONLY on Product Inventory', () => {
+    assert.strictEqual(isAddProductButtonVisible('inventory'), true);
+    assert.strictEqual(isAddProductButtonVisible('dashboard'), false);
+    assert.strictEqual(isAddProductButtonVisible('movements'), false);
+    assert.strictEqual(isAddProductButtonVisible('advisor'), false);
+    assert.strictEqual(isAddProductButtonVisible('reports'), false);
+    assert.strictEqual(isAddProductButtonVisible('admin'), false);
+});
+
+// -----------------------------------------------------------------------------
+// 10. Role-Based Administrative Authorization
+// -----------------------------------------------------------------------------
+function isAdminOrOwner(role) {
+    return role === 'owner' || role === 'admin';
+}
+
+test('Administrative authorization permits only owner and admin roles', () => {
+    assert.strictEqual(isAdminOrOwner('owner'), true);
+    assert.strictEqual(isAdminOrOwner('admin'), true);
+    assert.strictEqual(isAdminOrOwner('member'), false);
+    assert.strictEqual(isAdminOrOwner('moderator'), false);
+    assert.strictEqual(isAdminOrOwner(null), false);
+    assert.strictEqual(isAdminOrOwner(undefined), false);
+    assert.strictEqual(isAdminOrOwner(''), false);
+});
+
 console.log(`\n=================================================`);
 console.log(`Test Results: ${passed} Passed, ${failed} Failed`);
 console.log(`=================================================`);

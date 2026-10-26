@@ -256,7 +256,13 @@
             $('app-root').style.display = '';
 
             if (window.location.hash === '#admin') {
-                go('admin');
+                if (isAdminOrOwner()) {
+                    go('admin');
+                } else {
+                    window.location.hash = '';
+                    go('dashboard');
+                    notify('Access denied. Administrator privileges required.', 'error');
+                }
             } else {
                 go('dashboard');
             }
@@ -407,7 +413,7 @@
         if (avatarEl) avatarEl.textContent = (displayName[0] || 'U').toUpperCase();
 
         if (adminBtn) {
-            if (role === 'owner' || role === 'admin' || role === 'moderator') {
+            if (role === 'owner' || role === 'admin') {
                 adminBtn.classList.remove('hide');
                 adminBtn.querySelector('.nav-badge').textContent = role.toUpperCase();
             } else {
@@ -1839,6 +1845,12 @@
                 await loadAdminOverviewFallback();
             }
 
+            // Hide bootstrap panel if user is already owner
+            const bootstrapPanel = $('admin-panel-bootstrap-owner');
+            if (bootstrapPanel) {
+                bootstrapPanel.style.display = (state.currentRole === 'owner') ? 'none' : '';
+            }
+
             // Load Users table
             await loadAdminUsers();
 
@@ -2085,30 +2097,14 @@
             btn.textContent = 'Processing...';
 
             try {
-                // Try RPC first
+                // Enforce server-side authorization RPC
                 const { error } = await supabase.rpc('admin_toggle_suspension', {
                     p_target_user_id: userId,
                     p_suspend: !isCurrentlySuspended,
                     p_reason: reason
                 });
 
-                if (error && error.code === 'PGRST202') {
-                    // Direct table update fallback
-                    await supabase.from('profiles').update({
-                        is_suspended: !isCurrentlySuspended,
-                        suspension_reason: reason,
-                        updated_at: new Date().toISOString()
-                    }).eq('id', userId);
-
-                    // Insert audit log
-                    await supabase.from('admin_audit_logs').insert({
-                        actor_id: state.currentUser.id,
-                        action: isCurrentlySuspended ? 'USER_REACTIVATED' : 'USER_SUSPENDED',
-                        target_type: 'user',
-                        target_id: userId,
-                        details: { reason }
-                    });
-                } else if (error) {
+                if (error) {
                     throw error;
                 }
 
@@ -2167,24 +2163,13 @@
             btn.textContent = 'Updating...';
 
             try {
+                // Enforce server-side authorization RPC
                 const { error } = await supabase.rpc('admin_assign_role', {
                     p_target_user_id: userId,
                     p_role: newRole
                 });
 
-                if (error && error.code === 'PGRST202') {
-                    // Fallback
-                    if (newRole === 'none') {
-                        await supabase.from('platform_roles').delete().eq('user_id', userId);
-                    } else {
-                        await supabase.from('platform_roles').upsert({
-                            user_id: userId,
-                            role: newRole,
-                            assigned_at: new Date().toISOString(),
-                            assigned_by: state.currentUser.id
-                        });
-                    }
-                } else if (error) {
+                if (error) {
                     throw error;
                 }
 
@@ -2225,13 +2210,7 @@
         try {
             const { data, error } = await supabase.rpc('bootstrap_initial_owner');
             if (error) {
-                // If RPC not present, try direct insert
-                const { error: insertErr } = await supabase.from('platform_roles').insert({
-                    user_id: state.currentUser.id,
-                    role: 'owner',
-                    assigned_at: new Date().toISOString()
-                });
-                if (insertErr) throw insertErr;
+                throw error;
             }
 
             state.currentRole = 'owner';
@@ -2240,26 +2219,63 @@
             await loadAdminData();
         } catch (err) {
             console.error(err);
-            notify('Bootstrap failed: ' + err.message, 'error');
+            notify('Bootstrap failed: ' + (err.message || 'Database rejected bootstrap request.'), 'error');
         }
     }
 
     // -------------------------------------------------------------------------
-    // Navigation & Page Switching
+    // Navigation, Dynamic Greeting & Page Switching
     // -------------------------------------------------------------------------
+    function getGreeting(firstName, date = new Date()) {
+        const hour = date.getHours();
+        let timeOfDay = 'Good evening';
+        if (hour >= 5 && hour < 12) {
+            timeOfDay = 'Good morning';
+        } else if (hour >= 12 && hour < 17) {
+            timeOfDay = 'Good afternoon';
+        }
+        const cleanName = (firstName || '').trim();
+        return cleanName ? `${timeOfDay}, ${cleanName} 👋` : `${timeOfDay} 👋`;
+    }
+
+    function getUserFirstName() {
+        const rawName = state.currentProfile?.full_name || 
+                        state.currentUser?.user_metadata?.full_name || 
+                        state.currentUser?.user_metadata?.name || '';
+        const trimmed = rawName.trim();
+        if (!trimmed) return '';
+        const firstWord = trimmed.split(/\s+/)[0];
+        return firstWord || '';
+    }
+
+    function updateDashboardGreeting() {
+        if (state.currentView === 'dashboard') {
+            const firstName = getUserFirstName();
+            const greeting = getGreeting(firstName);
+            if ($('title')) $('title').textContent = greeting;
+            if ($('subtitle')) $('subtitle').textContent = "Here's your business at a glance.";
+        }
+    }
+
     const pageHeaders = {
-        dashboard: ['Dashboard overview', 'Know what you have. Know what needs attention.'],
-        inventory: ['Product inventory', 'Your catalogue, quantities, prices and stock health.'],
-        movements: ['Stock movements', 'A traceable record of every sale, restock and adjustment.'],
-        advisor: ['StockSense Adviser', 'Turn your available budget into a transparent restocking plan.'],
-        reports: ['Reports & insights', 'Understand the inventory and activity you have recorded.'],
+        dashboard: ['', "Here's your business at a glance."],
+        inventory: ['Product Inventory', 'Manage your catalog, products, prices, and stock.'],
+        movements: ['Stock Movements', 'Track sales, restocking, and inventory adjustments.'],
+        advisor: ['StockSense Adviser', 'Get practical guidance for managing your stock.'],
+        reports: ['Reports', 'Understand your inventory performance.'],
         admin: ['Platform Administration', 'Platform overview, user accounts, security roles and audit logs.']
     };
 
     function go(pageId) {
         if (pageId === 'admin') {
+            if (!state.currentUser) {
+                showAuthScreen('signin');
+                return;
+            }
             if (!isAdminOrOwner()) {
+                window.location.hash = '';
                 notify('Access denied. Administrator privileges required.', 'error');
+                go('dashboard');
                 return;
             }
             window.location.hash = '#admin';
@@ -2280,9 +2296,17 @@
             el.classList.toggle('active', el.dataset.page === pageId);
         });
 
-        if (pageHeaders[pageId]) {
-            $('title').textContent = pageHeaders[pageId][0];
-            $('subtitle').textContent = pageHeaders[pageId][1];
+        if (pageId === 'dashboard') {
+            updateDashboardGreeting();
+        } else if (pageHeaders[pageId]) {
+            if ($('title')) $('title').textContent = pageHeaders[pageId][0];
+            if ($('subtitle')) $('subtitle').textContent = pageHeaders[pageId][1];
+        }
+
+        // Add Product button belongs ONLY on Product Inventory
+        const addBtn = $('add');
+        if (addBtn) {
+            addBtn.style.display = (pageId === 'inventory') ? '' : 'none';
         }
 
         $('sidebar')?.classList.remove('open');
@@ -2506,6 +2530,54 @@
         month: 'short',
         year: 'numeric'
     });
+
+    // Dynamic greeting refresh when window/tab regains focus or becomes visible
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && state.currentView === 'dashboard') {
+            updateDashboardGreeting();
+        }
+    });
+
+    window.addEventListener('focus', () => {
+        if (state.currentView === 'dashboard') {
+            updateDashboardGreeting();
+        }
+    });
+
+    // Secure browser URL hash changes for #admin navigation
+    window.addEventListener('hashchange', async () => {
+        if (window.location.hash === '#admin') {
+            if (!state.currentUser) {
+                showAuthScreen('signin');
+                return;
+            }
+            const verifiedRole = await fetchUserRole(state.currentUser.id);
+            state.currentRole = verifiedRole;
+            updateUserSidebarInfo(state.currentUser, state.currentProfile, state.currentRole);
+            if (verifiedRole === 'owner' || verifiedRole === 'admin') {
+                go('admin');
+            } else {
+                window.location.hash = '';
+                go('dashboard');
+                notify('Access denied. Administrator privileges required.', 'error');
+            }
+        } else if (state.currentView === 'admin' && window.location.hash !== '#admin') {
+            go('dashboard');
+        }
+    });
+
+    // Expose helpers for tests and runtime inspection
+    if (typeof window !== 'undefined') {
+        window.StockSense = {
+            state,
+            getGreeting,
+            getUserFirstName,
+            updateDashboardGreeting,
+            isAdminOrOwner,
+            pageHeaders,
+            go
+        };
+    }
 
     // Start application session restoration
     initSession();
