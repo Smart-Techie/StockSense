@@ -678,6 +678,84 @@ BEGIN
 END;
 $$;
 
+-- ----------------------------------------------------------------------------
+-- 12b. ADMIN DELETE USER PROCEDURE
+-- ----------------------------------------------------------------------------
+-- Permanently deletes a user account, their catalog, and stock movements,
+-- logging an immutable audit record before executing the cascading wipe.
+CREATE OR REPLACE FUNCTION public.admin_delete_user(
+    p_target_user_id UUID
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+    v_caller UUID;
+    v_caller_role TEXT;
+    v_target_role TEXT;
+    v_target_email TEXT;
+    v_target_name TEXT;
+BEGIN
+    v_caller := auth.uid();
+    IF NOT is_platform_admin(v_caller) THEN
+        RAISE EXCEPTION 'Access denied: Platform administrator privileges required.';
+    END IF;
+
+    -- Self-deletion prevention
+    IF v_caller = p_target_user_id THEN
+        RAISE EXCEPTION 'You cannot delete your own administrator account.';
+    END IF;
+
+    -- Fetch target details
+    SELECT email INTO v_target_email FROM auth.users WHERE id = p_target_user_id;
+    SELECT full_name INTO v_target_name FROM public.profiles WHERE id = p_target_user_id;
+    SELECT role INTO v_target_role FROM public.platform_roles WHERE user_id = p_target_user_id;
+    v_caller_role := get_user_role(v_caller);
+
+    -- Owner protection: Nobody can delete the Owner
+    IF v_target_role = 'owner' THEN
+        RAISE EXCEPTION 'Cannot delete the Platform Owner account.';
+    END IF;
+
+    -- Hierarchy check: Only the Owner can delete other Admins
+    IF v_target_role = 'admin' AND v_caller_role <> 'owner' THEN
+        RAISE EXCEPTION 'Only the Platform Owner can delete an Administrator account.';
+    END IF;
+
+    -- Pre-deletion Audit Log
+    INSERT INTO public.admin_audit_logs (actor_id, action, target_type, target_id, details)
+    VALUES (
+        v_caller,
+        'USER_DELETED',
+        'user',
+        p_target_user_id::text,
+        jsonb_build_object(
+            'email', v_target_email,
+            'full_name', v_target_name,
+            'role', COALESCE(v_target_role, 'member'),
+            'deleted_at', NOW()
+        )
+    );
+
+    -- Clear foreign references where ON DELETE SET NULL or NO ACTION applies
+    UPDATE public.feedback SET user_id = NULL WHERE user_id = p_target_user_id;
+
+    -- Delete from auth.users (Cascades to profiles, products, stock_movements, platform_roles, staff_permissions)
+    DELETE FROM auth.users WHERE id = p_target_user_id;
+
+    -- Cleanup profiles if user row was orphaned
+    DELETE FROM public.profiles WHERE id = p_target_user_id;
+
+    RETURN jsonb_build_object(
+        'success', TRUE,
+        'deleted_user_id', p_target_user_id,
+        'email', v_target_email
+    );
+END;
+$$;
+
 -- Grant execution permissions
 GRANT EXECUTE ON FUNCTION public.is_user_suspended(UUID) TO authenticated, anon;
 GRANT EXECUTE ON FUNCTION public.get_user_role(UUID) TO authenticated;
@@ -689,6 +767,7 @@ GRANT EXECUTE ON FUNCTION public.admin_get_users(TEXT, TEXT, TEXT, INTEGER, INTE
 GRANT EXECUTE ON FUNCTION public.admin_toggle_suspension(UUID, BOOLEAN, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_assign_role(UUID, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.bootstrap_initial_owner() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_delete_user(UUID) TO authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 13. CUSTOMER FEEDBACK TABLE & POLICIES

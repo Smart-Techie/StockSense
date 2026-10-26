@@ -2213,6 +2213,25 @@
         const role = $('admin-user-role-filter')?.value || 'all';
         const status = $('admin-user-status-filter')?.value || 'all';
 
+        const urlParams = new URLSearchParams(window.location.search);
+        const isPreview = window.location.hostname === 'localhost' && urlParams.get('preview');
+
+        if (isPreview && state.adminUsers) {
+            let filtered = state.adminUsers;
+            if (search) {
+                const s = search.toLowerCase();
+                filtered = filtered.filter(u => (u.full_name || '').toLowerCase().includes(s) || (u.email || '').toLowerCase().includes(s) || (u.id || '').toLowerCase().includes(s));
+            }
+            if (role !== 'all') {
+                filtered = filtered.filter(u => (role === 'none' ? !u.role || u.role === 'member' : u.role === role));
+            }
+            if (status !== 'all') {
+                filtered = filtered.filter(u => (status === 'active' ? !u.is_suspended : u.is_suspended));
+            }
+            renderAdminUsersTable(filtered);
+            return;
+        }
+
         try {
             // Try calling admin_get_users RPC
             const { data, error } = await supabase.rpc('admin_get_users', {
@@ -2255,20 +2274,22 @@
         }
     }
 
-    function renderAdminUsersTable() {
+    function renderAdminUsersTable(userList = state.adminUsers) {
         const tbody = $('admin-users-table');
         if (!tbody) return;
 
-        if (!state.adminUsers.length) {
+        const users = userList || [];
+        if (!users.length) {
             tbody.innerHTML = '<tr><td colspan="7" class="empty">No matching users found.</td></tr>';
             return;
         }
 
-        tbody.innerHTML = state.adminUsers.map(u => {
+        tbody.innerHTML = users.map(u => {
             const isSuspended = u.is_suspended;
             const role = u.role || 'member';
             const isOwner = role === 'owner';
-            const isSelf = u.id === state.currentUser.id;
+            const isSelf = u.id === state.currentUser?.id;
+            const canDelete = !isOwner && !isSelf && (state.currentRole === 'owner' || role !== 'admin');
 
             return `
                 <tr>
@@ -2293,6 +2314,11 @@
                                 Set Role
                             </button>
                         ` : ''}
+                        ${canDelete ? `
+                            <button class="smallbtn del" data-admin-act="delete-user" data-uid="${u.id}" title="Permanently delete user account">
+                                Delete
+                            </button>
+                        ` : ''}
                     </td>
                 </tr>
             `;
@@ -2301,9 +2327,10 @@
         // Update pagination text
         const pageSpan = $('admin-users-pagination-info');
         if (pageSpan) {
-            const start = state.adminTotalUsers > 0 ? state.adminUserOffset + 1 : 0;
-            const end = Math.min(state.adminUserOffset + state.adminUserLimit, state.adminTotalUsers);
-            pageSpan.textContent = `Showing ${start}-${end} of ${state.adminTotalUsers} users`;
+            const total = users.length;
+            const start = total > 0 ? state.adminUserOffset + 1 : 0;
+            const end = Math.min(state.adminUserOffset + state.adminUserLimit, total);
+            pageSpan.textContent = `Showing ${start}-${end} of ${total} users`;
         }
     }
 
@@ -2414,6 +2441,120 @@
                 btn.disabled = false;
                 btn.textContent = `${actionWord} Account`;
                 notify(err.message || 'Operation failed.', 'error');
+            }
+        };
+    }
+
+    function openDeleteUserModal(userId) {
+        const user = state.adminUsers.find(u => u.id === userId);
+        if (!user) return;
+
+        // Privilege and safety checks
+        if (user.id === state.currentUser?.id) {
+            notify('You cannot delete your own administrator account.', 'error');
+            return;
+        }
+        if (user.role === 'owner') {
+            notify('Cannot delete the Platform Owner account.', 'error');
+            return;
+        }
+        if (user.role === 'admin' && state.currentRole !== 'owner') {
+            notify('Only the Platform Owner can delete an Administrator account.', 'error');
+            return;
+        }
+
+        const displayName = user.full_name || user.email || 'this user';
+
+        $('modal').innerHTML = `
+            <div class="modalbg" id="modal-bg">
+                <form class="modal" id="form-delete-user" style="max-width:480px">
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                        <div style="width:42px;height:42px;border-radius:10px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);color:#ef4444;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">
+                            ⚠️
+                        </div>
+                        <div>
+                            <h2 style="color:#ef4444;margin:0 0 2px;font-size:19px">Delete User Account</h2>
+                            <p class="sub" style="margin:0;font-size:12px">Permanent administrative account removal</p>
+                        </div>
+                    </div>
+
+                    <div class="auth-notice error" style="margin-bottom:16px;line-height:1.5;font-size:12.5px">
+                        <b>Warning:</b> You are about to permanently delete the account of <b style="color:#fff">${esc(displayName)}</b> (<code>${esc(user.email || user.id)}</code>).
+                        <br><br>
+                        This will permanently erase their profile, product catalogue, recorded sales, and stock movements. <b>This action is irreversible and cannot be undone.</b>
+                    </div>
+
+                    <div class="fg full" style="margin-bottom:16px">
+                        <label style="font-size:12px">To confirm deletion, type <b style="color:#ef4444;letter-spacing:1px">DELETE</b> below:</label>
+                        <input class="field" id="delete-user-confirm-input" placeholder="Type DELETE to confirm" autocomplete="off" required style="font-family:monospace;font-size:13px">
+                    </div>
+
+                    <div class="actions">
+                        <button type="button" class="btn secondary" id="modal-cancel">Cancel</button>
+                        <button class="btn dangerbtn" id="modal-submit-delete" type="submit" disabled style="background:#ef4444;border-color:#ef4444;color:#fff">
+                            Permanently Delete User
+                        </button>
+                    </div>
+                </form>
+            </div>
+        `;
+
+        $('modal-cancel').onclick = closeModal;
+        $('modal-bg').onclick = e => { if (e.target.id === 'modal-bg') closeModal(); };
+
+        const confirmInput = $('delete-user-confirm-input');
+        const submitBtn = $('modal-submit-delete');
+
+        confirmInput.oninput = () => {
+            submitBtn.disabled = confirmInput.value.trim() !== 'DELETE';
+        };
+
+        $('form-delete-user').onsubmit = async e => {
+            e.preventDefault();
+            if (confirmInput.value.trim() !== 'DELETE') return;
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Deleting user...';
+
+            const urlParams = new URLSearchParams(window.location.search);
+            const isPreview = window.location.hostname === 'localhost' && urlParams.get('preview');
+
+            try {
+                if (isPreview) {
+                    state.adminUsers = state.adminUsers.filter(u => u.id !== userId);
+                    state.adminTotalUsers = Math.max(0, state.adminTotalUsers - 1);
+                    if (state.adminAuditLogs) {
+                        state.adminAuditLogs.unshift({
+                            id: 'mock-audit-' + Date.now(),
+                            actor_email: state.currentUser ? state.currentUser.email : 'admin@stocksense.io',
+                            action: 'USER_DELETED',
+                            target_type: 'user',
+                            target_id: userId,
+                            details: { email: user.email, name: user.full_name },
+                            created_at: new Date().toISOString()
+                        });
+                    }
+                    closeModal();
+                    notify(`User "${displayName}" was permanently deleted.`, 'success');
+                    renderAdminUsersTable();
+                    return;
+                }
+
+                const { error } = await supabase.rpc('admin_delete_user', {
+                    p_target_user_id: userId
+                });
+
+                if (error) {
+                    throw error;
+                }
+
+                closeModal();
+                notify(`User "${displayName}" was permanently deleted.`, 'success');
+                await loadAdminUsers();
+            } catch (err) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Permanently Delete User';
+                notify(err.message || 'Failed to delete user.', 'error');
             }
         };
     }
@@ -3760,6 +3901,7 @@
             if (act === 'details') openUserDetailsModal(uid);
             if (act === 'toggle-suspend') openSuspendModal(uid, adminActBtn.dataset.suspended === 'true');
             if (act === 'assign-role') openAssignRoleModal(uid, adminActBtn.dataset.role);
+            if (act === 'delete-user') openDeleteUserModal(uid);
             return;
         }
     });
@@ -4020,7 +4162,8 @@
             selectBulkCustomer,
             executeBulkProductImport,
             getAuthRedirectUrl,
-            showAuthScreen
+            showAuthScreen,
+            openDeleteUserModal
         };
     }
 

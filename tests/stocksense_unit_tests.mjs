@@ -903,6 +903,71 @@ test('Resend verification cooldown prevents immediate repeated clicks', () => {
     assert.strictEqual(canResend(), true);
 });
 
+// -----------------------------------------------------------------------------
+// 13. Admin User Deletion Authorization & Safeguards
+// -----------------------------------------------------------------------------
+function canAdminDeleteUser(callerRole, callerId, targetUser) {
+    if (!callerRole || !['owner', 'admin'].includes(callerRole)) {
+        return { allowed: false, reason: 'Administrator privileges required.' };
+    }
+    if (callerId === targetUser.id) {
+        return { allowed: false, reason: 'You cannot delete your own administrator account.' };
+    }
+    if (targetUser.role === 'owner') {
+        return { allowed: false, reason: 'Cannot delete the Platform Owner account.' };
+    }
+    if (targetUser.role === 'admin' && callerRole !== 'owner') {
+        return { allowed: false, reason: 'Only the Platform Owner can delete an Administrator account.' };
+    }
+    return { allowed: true };
+}
+
+test('canAdminDeleteUser rejects non-admin users', () => {
+    const res = canAdminDeleteUser('member', 'user-1', { id: 'user-2', role: 'member' });
+    assert.strictEqual(res.allowed, false);
+    assert.ok(res.reason.includes('Administrator privileges required'));
+});
+
+test('canAdminDeleteUser prevents administrator self-deletion', () => {
+    const res = canAdminDeleteUser('admin', 'admin-1', { id: 'admin-1', role: 'admin' });
+    assert.strictEqual(res.allowed, false);
+    assert.ok(res.reason.includes('cannot delete your own administrator account'));
+});
+
+test('canAdminDeleteUser prevents deleting the platform owner', () => {
+    const res = canAdminDeleteUser('owner', 'owner-1', { id: 'owner-2', role: 'owner' });
+    assert.strictEqual(res.allowed, false);
+    assert.ok(res.reason.includes('Cannot delete the Platform Owner account'));
+});
+
+test('canAdminDeleteUser prevents regular admin from deleting another admin', () => {
+    const res = canAdminDeleteUser('admin', 'admin-1', { id: 'admin-2', role: 'admin' });
+    assert.strictEqual(res.allowed, false);
+    assert.ok(res.reason.includes('Only the Platform Owner can delete an Administrator account'));
+});
+
+test('canAdminDeleteUser permits admin to delete standard customer', () => {
+    const res = canAdminDeleteUser('admin', 'admin-1', { id: 'cust-1', role: 'member' });
+    assert.strictEqual(res.allowed, true);
+});
+
+test('canAdminDeleteUser permits owner to delete customer and admin accounts', () => {
+    const resCustomer = canAdminDeleteUser('owner', 'owner-1', { id: 'cust-1', role: 'member' });
+    assert.strictEqual(resCustomer.allowed, true);
+
+    const resAdmin = canAdminDeleteUser('owner', 'owner-1', { id: 'admin-1', role: 'admin' });
+    assert.strictEqual(resAdmin.allowed, true);
+});
+
+test('Delete confirmation input requires exact DELETE keyword', () => {
+    const isValidConfirmation = (input) => input.trim() === 'DELETE';
+    assert.strictEqual(isValidConfirmation('delete'), false);
+    assert.strictEqual(isValidConfirmation('Delete'), false);
+    assert.strictEqual(isValidConfirmation(''), false);
+    assert.strictEqual(isValidConfirmation(' DELETE '), true);
+    assert.strictEqual(isValidConfirmation('DELETE'), true);
+});
+
 console.log(`\n=================================================`);
 console.log(`Test Results: ${passed} Passed, ${failed} Failed`);
 console.log(`=================================================`);

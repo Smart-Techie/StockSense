@@ -574,6 +574,58 @@ async function runBrowserTests() {
             assert(!overflow.hasOverflow, `Viewport ${w}px on auth verify screen has NO horizontal overflow (scrollWidth=${overflow.scrollWidth}, innerWidth=${w})`);
         }
 
+        // =========================================================================
+        // 14. Admin User Deletion E2E Flow
+        // =========================================================================
+        console.log('\n--- Test Suite 14: Admin User Deletion Flow ---');
+
+        // Go to Admin portal & User Management tab
+        await evaluate(`window.StockSense.go('admin')`);
+        await evaluate(`document.querySelector('[data-admin-tab="users"]')?.click()`);
+        await sleep(150);
+
+        // Check user management table has Delete buttons
+        const deleteButtonsCount = await evaluate(`document.querySelectorAll('[data-admin-act="delete-user"]').length`);
+        assert(deleteButtonsCount > 0, `Admin User Management renders Delete buttons (found ${deleteButtonsCount})`);
+
+        // Target user details before deletion
+        const initialUserCount = await evaluate(`document.querySelectorAll('#admin-users-table tr').length`);
+        const targetUserId = await evaluate(`document.querySelector('[data-admin-act="delete-user"]')?.dataset.uid`);
+        assert(targetUserId, `Found target user to test deletion: ${targetUserId}`);
+
+        // Click Delete button on target user
+        await evaluate(`document.querySelector('[data-admin-act="delete-user"][data-uid="${targetUserId}"]').click()`);
+        await sleep(150);
+
+        // Verify Delete Confirmation Modal opens
+        const modalTitle = await evaluate(`document.querySelector('#form-delete-user h2')?.textContent`);
+        assert(modalTitle && modalTitle.includes('Delete User Account'), `Delete Confirmation modal is open: "${modalTitle}"`);
+
+        const isSubmitInitiallyDisabled = await evaluate(`document.querySelector('#modal-submit-delete')?.disabled`);
+        assert(isSubmitInitiallyDisabled === true, 'Permanently Delete User button is disabled before typing DELETE');
+
+        // Type "DELETE" into confirmation field
+        await evaluate(`(() => {
+            const input = document.querySelector('#delete-user-confirm-input');
+            input.value = 'DELETE';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        await sleep(50);
+
+        const isSubmitEnabled = await evaluate(`!document.querySelector('#modal-submit-delete')?.disabled`);
+        assert(isSubmitEnabled === true, 'Permanently Delete User button is enabled after typing DELETE');
+
+        // Submit deletion form
+        await evaluate(`document.querySelector('#form-delete-user').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))`);
+        await sleep(200);
+
+        // Verify user was removed from table
+        const finalUserCount = await evaluate(`document.querySelectorAll('#admin-users-table tr').length`);
+        assert(finalUserCount === initialUserCount - 1, `User was removed from table (${initialUserCount} -> ${finalUserCount})`);
+
+        const deletedUserInDom = await evaluate(`document.querySelector('[data-uid="${targetUserId}"]')`);
+        assert(!deletedUserInDom, `Deleted user ID ${targetUserId} no longer exists in DOM`);
+
         console.log('\n=================================================');
         console.log(`End-to-End Test Results: ${passCount} Passed, ${failCount} Failed`);
         console.log('=================================================');

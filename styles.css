@@ -591,10 +591,16 @@ main {
     border-color: var(--panel-border);
 }
 
+.smallbtn.del {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
 .smallbtn.del:hover {
-    background: #4a1c27;
-    border-color: #7b293d;
-    color: #ff7188;
+    background: #6e2434;
+    border-color: #ef4444;
+    color: #fff;
 }
 
 /* --------------------------------------------------------------------------
