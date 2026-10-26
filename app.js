@@ -222,6 +222,7 @@
         const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
         if (isLocalhost && previewRole) {
+            recordUserActivity();
             const isOwner = previewRole === 'owner';
             const mockUser = {
                 id: '00000000-0000-0000-0000-000000000001',
@@ -252,7 +253,7 @@
 
             updateUserSidebarInfo(mockUser, state.currentProfile, state.currentRole);
             $('auth-screen').style.display = 'none';
-            $('app-root').style.display = 'grid';
+            $('app-root').style.display = '';
 
             if (window.location.hash === '#admin') {
                 go('admin');
@@ -327,7 +328,7 @@
 
         // Transition from auth to application
         $('auth-screen').style.display = 'none';
-        $('app-root').style.display = 'grid';
+        $('app-root').style.display = '';
 
         // Check if navigated directly to #admin
         if (window.location.hash === '#admin') {
