@@ -626,6 +626,18 @@ async function runBrowserTests() {
         const deletedUserInDom = await evaluate(`document.querySelector('[data-uid="${targetUserId}"]')`);
         assert(!deletedUserInDom, `Deleted user ID ${targetUserId} no longer exists in DOM`);
 
+        // Test persistence across browser refresh (F5 / Page.reload)
+        await send('Page.reload');
+        await sleep(1000);
+        await evaluate(`window.StockSense.go('admin')`);
+        await evaluate(`document.querySelector('[data-admin-tab="users"]')?.click()`);
+        await sleep(250);
+
+        const userAfterReload = await evaluate(`document.querySelector('[data-uid="${targetUserId}"]')`);
+        assert(!userAfterReload, `Deleted user ID ${targetUserId} stays deleted and does NOT reappear after refreshing`);
+        const countAfterReload = await evaluate(`document.querySelectorAll('#admin-users-table tr').length`);
+        assert(countAfterReload === finalUserCount, `User table row count remains ${finalUserCount} after browser refresh`);
+
         console.log('\n=================================================');
         console.log(`End-to-End Test Results: ${passCount} Passed, ${failCount} Failed`);
         console.log('=================================================');

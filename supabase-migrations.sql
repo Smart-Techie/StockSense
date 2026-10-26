@@ -197,6 +197,11 @@ CREATE POLICY "profiles_update_own" ON public.profiles
         OR is_platform_admin(auth.uid())
     );
 
+DROP POLICY IF EXISTS "profiles_delete_admin" ON public.profiles;
+CREATE POLICY "profiles_delete_admin" ON public.profiles
+    FOR DELETE TO authenticated
+    USING (is_platform_admin(auth.uid()));
+
 -- Platform Roles Policies
 DROP POLICY IF EXISTS "roles_select_own" ON public.platform_roles;
 CREATE POLICY "roles_select_own" ON public.platform_roles
@@ -739,14 +744,21 @@ BEGIN
         )
     );
 
-    -- Clear foreign references where ON DELETE SET NULL or NO ACTION applies
+    -- Clear references where ON DELETE SET NULL applies
     UPDATE public.feedback SET user_id = NULL WHERE user_id = p_target_user_id;
+    UPDATE public.platform_roles SET assigned_by = NULL WHERE assigned_by = p_target_user_id;
+    UPDATE public.staff_permissions SET granted_by = NULL WHERE granted_by = p_target_user_id;
+    UPDATE public.platform_settings SET updated_by = NULL WHERE updated_by = p_target_user_id;
 
-    -- Delete from auth.users (Cascades to profiles, products, stock_movements, platform_roles, staff_permissions)
-    DELETE FROM auth.users WHERE id = p_target_user_id;
-
-    -- Cleanup profiles if user row was orphaned
+    -- Delete user stock movements, products, permissions, roles, and profile explicitly first
+    DELETE FROM public.stock_movements WHERE user_id = p_target_user_id;
+    DELETE FROM public.products WHERE user_id = p_target_user_id;
+    DELETE FROM public.staff_permissions WHERE user_id = p_target_user_id;
+    DELETE FROM public.platform_roles WHERE user_id = p_target_user_id;
     DELETE FROM public.profiles WHERE id = p_target_user_id;
+
+    -- Delete from auth.users (Cascades to any remaining auth session records)
+    DELETE FROM auth.users WHERE id = p_target_user_id;
 
     RETURN jsonb_build_object(
         'success', TRUE,

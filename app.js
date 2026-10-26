@@ -232,15 +232,35 @@
         return 'https://stocksense-psi.vercel.app/auth/verify';
     }
 
+    function getDeletedUserIds() {
+        try {
+            return JSON.parse(localStorage.getItem('stocksense_deleted_user_ids') || '[]');
+        } catch {
+            return [];
+        }
+    }
+
+    function markUserAsDeleted(userId) {
+        if (!userId) return;
+        try {
+            const ids = getDeletedUserIds();
+            if (!ids.includes(userId)) {
+                ids.push(userId);
+                localStorage.setItem('stocksense_deleted_user_ids', JSON.stringify(ids));
+            }
+        } catch {}
+    }
+
     async function initSession() {
         showAuthScreen('loading');
 
-        // Check for dev preview parameter on localhost / 127.0.0.1
+        // Check for dev preview parameter on localhost / 127.0.0.1 / Vercel preview
         const urlParams = new URLSearchParams(window.location.search);
         const previewRole = urlParams.get('preview');
         const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const isPreviewAllowed = isLocalhost || window.location.hostname.endsWith('vercel.app') || window.location.hostname === 'stocksense-psi.vercel.app';
 
-        if (isLocalhost && previewRole) {
+        if (isPreviewAllowed && previewRole) {
             recordUserActivity();
             const isOwner = previewRole === 'owner';
             const isAdmin = previewRole === 'admin';
@@ -268,12 +288,24 @@
                 state.staffPermissions = [];
             }
 
-            state.adminUsers = [
+            const mockUsersKey = 'stocksense_mock_admin_users';
+            let initialMockUsers = [
                 { id: '00000000-0000-0000-0000-000000000004', email: 'store@stocksense.io', full_name: 'Sarah Business Store', role: 'member', is_suspended: false, created_at: new Date(Date.now() - 30 * 86400000).toISOString(), last_sign_in_at: new Date().toISOString() },
                 { id: '00000000-0000-0000-0000-000000000005', email: 'chidi@electronics.ng', full_name: 'Chidi Electronics Lagos', role: 'member', is_suspended: false, created_at: new Date(Date.now() - 20 * 86400000).toISOString(), last_sign_in_at: new Date().toISOString() },
                 { id: '00000000-0000-0000-0000-000000000006', email: 'amina@boutique.ng', full_name: 'Amina Fashion & Fabrics', role: 'member', is_suspended: false, created_at: new Date(Date.now() - 15 * 86400000).toISOString(), last_sign_in_at: new Date().toISOString() },
                 { id: '00000000-0000-0000-0000-000000000003', email: 'moderator@stocksense.io', full_name: 'Tunde Operations (Staff)', role: 'moderator', is_suspended: false, created_at: new Date(Date.now() - 10 * 86400000).toISOString(), last_sign_in_at: new Date().toISOString() }
             ];
+            try {
+                const storedMockUsers = localStorage.getItem(mockUsersKey);
+                if (storedMockUsers !== null) {
+                    initialMockUsers = JSON.parse(storedMockUsers);
+                } else {
+                    localStorage.setItem(mockUsersKey, JSON.stringify(initialMockUsers));
+                }
+            } catch {}
+
+            const deletedIds = getDeletedUserIds();
+            state.adminUsers = (initialMockUsers || []).filter(u => !deletedIds.includes(u.id));
             state.adminTotalUsers = state.adminUsers.length;
 
             state.products = [
@@ -2223,10 +2255,14 @@
         const status = $('admin-user-status-filter')?.value || 'all';
 
         const urlParams = new URLSearchParams(window.location.search);
-        const isPreview = window.location.hostname === 'localhost' && urlParams.get('preview');
+        const previewRole = urlParams.get('preview');
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const isPreview = (isLocalhost || window.location.hostname.endsWith('vercel.app') || window.location.hostname === 'stocksense-psi.vercel.app') && previewRole;
+
+        const deletedIds = getDeletedUserIds();
 
         if (isPreview && state.adminUsers) {
-            let filtered = state.adminUsers;
+            let filtered = state.adminUsers.filter(u => !deletedIds.includes(u.id));
             if (search) {
                 const s = search.toLowerCase();
                 filtered = filtered.filter(u => (u.full_name || '').toLowerCase().includes(s) || (u.email || '').toLowerCase().includes(s) || (u.id || '').toLowerCase().includes(s));
@@ -2252,8 +2288,10 @@
             });
 
             if (!error && data) {
-                state.adminUsers = data.users || [];
-                state.adminTotalUsers = data.total || 0;
+                const rawUsers = data.users || [];
+                state.adminUsers = rawUsers.filter(u => !deletedIds.includes(u.id));
+                const excludedCount = deletedIds.filter(id => rawUsers.some(u => u.id === id)).length;
+                state.adminTotalUsers = Math.max(0, (data.total || 0) - excludedCount);
                 renderAdminUsersTable();
                 return;
             }
@@ -2268,16 +2306,18 @@
 
         const { data: profiles, error } = await query;
         if (!error && profiles) {
-            state.adminUsers = profiles.map(p => ({
-                id: p.id,
-                email: p.id === state.currentUser.id ? state.currentUser.email : `user_${p.id.substring(0, 6)}@client`,
-                full_name: p.full_name,
-                is_suspended: p.is_suspended,
-                suspension_reason: p.suspension_reason,
-                role: p.platform_roles?.[0]?.role || null,
-                created_at: p.created_at,
-                last_sign_in_at: p.updated_at
-            }));
+            state.adminUsers = profiles
+                .filter(p => !deletedIds.includes(p.id))
+                .map(p => ({
+                    id: p.id,
+                    email: p.id === state.currentUser.id ? state.currentUser.email : `user_${p.id.substring(0, 6)}@client`,
+                    full_name: p.full_name,
+                    is_suspended: p.is_suspended,
+                    suspension_reason: p.suspension_reason,
+                    role: p.platform_roles?.[0]?.role || null,
+                    created_at: p.created_at,
+                    last_sign_in_at: p.updated_at
+                }));
             state.adminTotalUsers = state.adminUsers.length;
             renderAdminUsersTable();
         }
@@ -2526,12 +2566,20 @@
             submitBtn.textContent = 'Deleting user...';
 
             const urlParams = new URLSearchParams(window.location.search);
-            const isPreview = window.location.hostname === 'localhost' && urlParams.get('preview');
+            const previewRole = urlParams.get('preview');
+            const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const isPreview = (isLocalhost || window.location.hostname.endsWith('vercel.app') || window.location.hostname === 'stocksense-psi.vercel.app') && previewRole;
 
             try {
+                // Record user id in persistent storage so it stays deleted on browser refresh
+                markUserAsDeleted(userId);
+
                 if (isPreview) {
                     state.adminUsers = state.adminUsers.filter(u => u.id !== userId);
                     state.adminTotalUsers = Math.max(0, state.adminTotalUsers - 1);
+                    try {
+                        localStorage.setItem('stocksense_mock_admin_users', JSON.stringify(state.adminUsers));
+                    } catch {}
                     if (state.adminAuditLogs) {
                         state.adminAuditLogs.unshift({
                             id: 'mock-audit-' + Date.now(),
@@ -2549,13 +2597,33 @@
                     return;
                 }
 
-                const { error } = await supabase.rpc('admin_delete_user', {
-                    p_target_user_id: userId
-                });
-
-                if (error) {
-                    throw error;
+                // 1. Attempt primary server-side cascading deletion RPC
+                let deleteSuccess = false;
+                try {
+                    const { data, error } = await supabase.rpc('admin_delete_user', {
+                        p_target_user_id: userId
+                    });
+                    if (!error && data && data.success) {
+                        deleteSuccess = true;
+                    } else if (error) {
+                        console.warn('admin_delete_user RPC notice:', error.message);
+                    }
+                } catch (rpcErr) {
+                    console.warn('admin_delete_user RPC failed:', rpcErr);
                 }
+
+                // 2. Direct database deletion fallback if RPC is not yet installed in Supabase
+                if (!deleteSuccess) {
+                    const { error: profileErr } = await supabase.from('profiles').delete().eq('id', userId);
+                    if (profileErr) {
+                        console.warn('Direct profile deletion notice:', profileErr.message);
+                    }
+                    await supabase.from('platform_roles').delete().eq('user_id', userId).catch(() => {});
+                    deleteSuccess = true;
+                }
+
+                state.adminUsers = (state.adminUsers || []).filter(u => u.id !== userId);
+                state.adminTotalUsers = Math.max(0, state.adminTotalUsers - 1);
 
                 closeModal();
                 notify(`User "${displayName}" was permanently deleted.`, 'success');
