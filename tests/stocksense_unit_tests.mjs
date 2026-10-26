@@ -546,6 +546,272 @@ test('Feedback validation rejects invalid email format when provided', () => {
     assert.strictEqual(res.valid, false);
 });
 
+// -----------------------------------------------------------------------------
+// 12. Inventory Setup Assistance & WhatsApp Integration
+// -----------------------------------------------------------------------------
+function buildWhatsAppUrl(configuredPhone, optionType) {
+    const digitsOnly = (configuredPhone || '').replace(/[^0-9]/g, '');
+    if (!digitsOnly) return null;
+
+    let message = '';
+    if (optionType === 'upload') {
+        message = 'Hello StockSense team, I need assistance uploading the products in my shop to StockSense. Please explain the process, requirements, pricing, and next steps.';
+    } else if (optionType === 'training') {
+        message = 'Hello StockSense team, I would like assistance learning how to use StockSense. I need training for myself or my staff. Please explain the available options, pricing, and next steps.';
+    } else {
+        message = 'Hello StockSense team, I need assistance with setting up my inventory.';
+    }
+
+    return `https://wa.me/${digitsOnly}?text=${encodeURIComponent(message)}`;
+}
+
+test('WhatsApp URL builder generates valid wa.me link with prefilled upload message', () => {
+    const url = buildWhatsAppUrl('+234 801 234 5678', 'upload');
+    assert.ok(url);
+    assert.ok(url.startsWith('https://wa.me/2348012345678?text='));
+    assert.ok(url.includes(encodeURIComponent('I need assistance uploading the products in my shop to StockSense')));
+});
+
+test('WhatsApp URL builder generates valid wa.me link with prefilled training message', () => {
+    const url = buildWhatsAppUrl('2348012345678', 'training');
+    assert.ok(url);
+    assert.ok(url.startsWith('https://wa.me/2348012345678?text='));
+    assert.ok(url.includes(encodeURIComponent('I would like assistance learning how to use StockSense')));
+});
+
+test('WhatsApp URL builder returns null when phone number is missing or unconfigured', () => {
+    assert.strictEqual(buildWhatsAppUrl('', 'upload'), null);
+    assert.strictEqual(buildWhatsAppUrl('   ', 'training'), null);
+    assert.strictEqual(buildWhatsAppUrl(null, 'upload'), null);
+    assert.strictEqual(buildWhatsAppUrl(undefined, 'training'), null);
+});
+
+// -----------------------------------------------------------------------------
+// 13. Admin Staff Permissions & Role Governance
+// -----------------------------------------------------------------------------
+function canBulkUpload(role, permissions = []) {
+    if (role === 'owner' || role === 'admin') return true;
+    if (role === 'moderator') {
+        return Array.isArray(permissions) && permissions.includes('bulk_product_upload');
+    }
+    return false; // Ordinary users or null roles never have access
+}
+
+test('canBulkUpload allows owner and admin unconditionally', () => {
+    assert.strictEqual(canBulkUpload('owner', []), true);
+    assert.strictEqual(canBulkUpload('admin', []), true);
+});
+
+test('canBulkUpload permits moderator ONLY when bulk_product_upload permission is granted', () => {
+    assert.strictEqual(canBulkUpload('moderator', ['bulk_product_upload']), true);
+    assert.strictEqual(canBulkUpload('moderator', []), false);
+    assert.strictEqual(canBulkUpload('moderator', ['other_perm']), false);
+});
+
+test('canBulkUpload rejects ordinary customers even if permission flag is spoofed', () => {
+    assert.strictEqual(canBulkUpload(null, ['bulk_product_upload']), false);
+    assert.strictEqual(canBulkUpload('user', ['bulk_product_upload']), false);
+    assert.strictEqual(canBulkUpload(undefined, ['bulk_product_upload']), false);
+});
+
+test('canBulkUpload reflects immediate revocation on moderator', () => {
+    let staffPerms = ['bulk_product_upload'];
+    assert.strictEqual(canBulkUpload('moderator', staffPerms), true);
+
+    // Revoke permission
+    staffPerms = staffPerms.filter(p => p !== 'bulk_product_upload');
+    assert.strictEqual(canBulkUpload('moderator', staffPerms), false);
+});
+
+// -----------------------------------------------------------------------------
+// 14. CSV Parsing & Validation for Staff Bulk Upload
+// -----------------------------------------------------------------------------
+function parseCsvText(text) {
+    if (!text) return [];
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+    const lines = [];
+    let row = [];
+    let col = '';
+    let insideQuote = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const nextChar = text[i + 1];
+
+        if (char === '"') {
+            if (insideQuote && nextChar === '"') {
+                col += '"';
+                i++;
+            } else {
+                insideQuote = !insideQuote;
+            }
+        } else if (char === ',' && !insideQuote) {
+            row.push(col);
+            col = '';
+        } else if ((char === '\r' || char === '\n') && !insideQuote) {
+            if (char === '\r' && nextChar === '\n') i++;
+            row.push(col);
+            if (row.length > 1 || (row.length === 1 && row[0].trim() !== '')) {
+                lines.push(row);
+            }
+            row = [];
+            col = '';
+        } else {
+            col += char;
+        }
+    }
+    if (col.length > 0 || row.length > 0) {
+        row.push(col);
+        if (row.length > 1 || (row.length === 1 && row[0].trim() !== '')) {
+            lines.push(row);
+        }
+    }
+    if (lines.length < 2) return [];
+
+    const headers = lines[0].map(h => h.trim().toLowerCase().replace(/^["']|["']$/g, ''));
+    const objects = [];
+    for (let r = 1; r < lines.length; r++) {
+        const rowValues = lines[r];
+        const obj = { _line: r + 1 };
+        headers.forEach((h, colIdx) => {
+            obj[h] = rowValues[colIdx] !== undefined ? rowValues[colIdx].trim() : '';
+        });
+        objects.push(obj);
+    }
+    return objects;
+}
+
+function validateCsvRows(rawRows, existingUserSkus = new Set()) {
+    const validRows = [];
+    const invalidRows = [];
+    const errors = [];
+    const seenSkusInFile = new Set();
+
+    rawRows.forEach((row, idx) => {
+        const lineNum = row._line || (idx + 2);
+        const rowErrors = [];
+
+        const name = (row.name || row['product name'] || '').trim();
+        if (!name) rowErrors.push('Product name is required');
+
+        let sku = (row.sku || '').trim();
+        if (sku) {
+            const lowerSku = sku.toLowerCase();
+            if (seenSkusInFile.has(lowerSku)) {
+                rowErrors.push(`Duplicate SKU "${sku}" within CSV file`);
+            } else {
+                seenSkusInFile.add(lowerSku);
+            }
+            if (existingUserSkus && existingUserSkus.has(lowerSku)) {
+                rowErrors.push(`SKU "${sku}" already exists in customer catalog`);
+            }
+        }
+
+        const category = (row.category || 'General').trim() || 'General';
+
+        const sellingRaw = row.selling_price || row['selling price'] || row.price;
+        const sellingPrice = sellingRaw !== undefined && sellingRaw !== '' ? Number(sellingRaw) : NaN;
+        if (isNaN(sellingPrice) || sellingPrice < 0) {
+            rowErrors.push('Selling price must be a valid non-negative number');
+        }
+
+        const costRaw = row.unit_cost || row['cost price'] || row.cost || '0';
+        const unitCost = costRaw !== '' ? Number(costRaw) : 0;
+        if (isNaN(unitCost) || unitCost < 0) {
+            rowErrors.push('Cost price must be a non-negative number');
+        }
+
+        const qtyRaw = row.quantity || row['initial quantity'] || row.qty || '0';
+        const quantity = qtyRaw !== '' ? parseInt(qtyRaw, 10) : 0;
+        if (isNaN(quantity) || quantity < 0) {
+            rowErrors.push('Quantity must be a non-negative whole number');
+        }
+
+        const minRaw = row.minimum_stock || row['min stock'] || row['minimum stock level'] || '5';
+        const minimumStock = minRaw !== '' ? parseInt(minRaw, 10) : 5;
+        if (isNaN(minimumStock) || minimumStock < 0) {
+            rowErrors.push('Minimum stock must be a non-negative whole number');
+        }
+
+        const supplier = (row.supplier || '').trim();
+        const emoji = (row.emoji || '📦').trim() || '📦';
+
+        if (rowErrors.length > 0) {
+            invalidRows.push({ ...row, errors: rowErrors });
+            errors.push(`Row ${lineNum} (${name || 'Unnamed'}): ${rowErrors.join(', ')}`);
+        } else {
+            validRows.push({
+                name,
+                sku: sku || null,
+                category,
+                unit_cost: unitCost,
+                selling_price: sellingPrice,
+                quantity,
+                minimum_stock: minimumStock,
+                supplier: supplier || null,
+                emoji
+            });
+        }
+    });
+
+    return { validRows, invalidRows, errors, totalRows: rawRows.length };
+}
+
+test('CSV Parser handles quotes, commas inside fields, and standard headers', () => {
+    const csv = `name,sku,category,unit_cost,selling_price,quantity,minimum_stock,supplier,emoji\r\n` +
+                `"Wireless Mouse, USB",MOU-101,Electronics,4500,7500,20,5,"Tech, Inc.",🖱️\r\n` +
+                `"Fast Cable",CAB-202,Accessories,1500,3000,50,10,CableCo,🔌`;
+
+    const parsed = parseCsvText(csv);
+    assert.strictEqual(parsed.length, 2);
+    assert.strictEqual(parsed[0].name, 'Wireless Mouse, USB');
+    assert.strictEqual(parsed[0].supplier, 'Tech, Inc.');
+    assert.strictEqual(parsed[1].sku, 'CAB-202');
+});
+
+test('CSV Validation approves well-formed product rows', () => {
+    const rawRows = [
+        { _line: 2, name: 'Standard Product', sku: 'STK-01', category: 'General', unit_cost: '2000', selling_price: '3500', quantity: '10', minimum_stock: '3', supplier: 'Vendor A', emoji: '📦' }
+    ];
+    const { validRows, invalidRows } = validateCsvRows(rawRows);
+    assert.strictEqual(validRows.length, 1);
+    assert.strictEqual(invalidRows.length, 0);
+    assert.strictEqual(validRows[0].selling_price, 3500);
+    assert.strictEqual(validRows[0].quantity, 10);
+});
+
+test('CSV Validation rejects rows with missing name or negative prices', () => {
+    const rawRows = [
+        { _line: 2, name: '', sku: 'STK-01', selling_price: '1000' },
+        { _line: 3, name: 'Negative Item', sku: 'STK-02', selling_price: '-500' },
+        { _line: 4, name: 'Negative Cost', sku: 'STK-03', selling_price: '1000', unit_cost: '-200' },
+        { _line: 5, name: 'Negative Qty', sku: 'STK-04', selling_price: '1000', quantity: '-5' }
+    ];
+    const { validRows, invalidRows, errors } = validateCsvRows(rawRows);
+    assert.strictEqual(validRows.length, 0);
+    assert.strictEqual(invalidRows.length, 4);
+    assert.ok(errors.some(e => e.includes('Product name is required')));
+    assert.ok(errors.some(e => e.includes('Selling price must be a valid non-negative number')));
+    assert.ok(errors.some(e => e.includes('Cost price must be a non-negative number')));
+    assert.ok(errors.some(e => e.includes('Quantity must be a non-negative whole number')));
+});
+
+test('CSV Validation detects duplicate SKUs within file and collisions with customer catalog', () => {
+    const rawRows = [
+        { _line: 2, name: 'Item 1', sku: 'DUP-01', selling_price: '1000' },
+        { _line: 3, name: 'Item 2', sku: 'DUP-01', selling_price: '1200' }, // Duplicate in file
+        { _line: 4, name: 'Item 3', sku: 'EXISTING-99', selling_price: '2000' } // Exists in customer's account
+    ];
+    const existingSkus = new Set(['existing-99']);
+    const { validRows, invalidRows, errors } = validateCsvRows(rawRows, existingSkus);
+
+    assert.strictEqual(validRows.length, 1); // Only Item 1 is valid
+    assert.strictEqual(invalidRows.length, 2);
+    assert.ok(errors.some(e => e.includes('Duplicate SKU "DUP-01" within CSV file')));
+    assert.ok(errors.some(e => e.includes('SKU "EXISTING-99" already exists in customer catalog')));
+});
+
 console.log(`\n=================================================`);
 console.log(`Test Results: ${passed} Passed, ${failed} Failed`);
 console.log(`=================================================`);

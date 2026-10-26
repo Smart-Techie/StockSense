@@ -41,12 +41,20 @@
         adminUserOffset: 0,
         adminUserLimit: 15,
         adminAuditLogs: [],
+        staffPermissions: [],
+        bulkUploadState: {
+            targetCustomer: null,
+            parsedProducts: [],
+            validProducts: [],
+            invalidRows: []
+        },
         platformSettings: {
             platform_name: "StockSense",
             currency_symbol: "₦",
             currency_code: "NGN",
             maintenance_mode: false,
-            low_stock_default: 5
+            low_stock_default: 5,
+            support_whatsapp: ""
         }
     };
 
@@ -224,10 +232,13 @@
         if (isLocalhost && previewRole) {
             recordUserActivity();
             const isOwner = previewRole === 'owner';
+            const isAdmin = previewRole === 'admin';
+            const isModerator = previewRole === 'moderator';
+
             const mockUser = {
-                id: '00000000-0000-0000-0000-000000000001',
-                email: isOwner ? 'owner@stocksense.io' : 'store@stocksense.io',
-                user_metadata: { full_name: isOwner ? 'Malcolm Jude (Owner)' : 'Sarah Business Store' }
+                id: isOwner ? '00000000-0000-0000-0000-000000000001' : (isAdmin ? '00000000-0000-0000-0000-000000000002' : (isModerator ? '00000000-0000-0000-0000-000000000003' : '00000000-0000-0000-0000-000000000004')),
+                email: isOwner ? 'owner@stocksense.io' : (isAdmin ? 'admin@stocksense.io' : (isModerator ? 'moderator@stocksense.io' : 'store@stocksense.io')),
+                user_metadata: { full_name: isOwner ? 'Malcolm Jude (Owner)' : (isAdmin ? 'Admin Staff' : (isModerator ? 'Tunde Operations (Staff)' : 'Sarah Business Store')) }
             };
             state.currentUser = mockUser;
             state.currentProfile = {
@@ -235,7 +246,24 @@
                 full_name: mockUser.user_metadata.full_name,
                 is_suspended: false
             };
-            state.currentRole = isOwner ? 'owner' : (previewRole === 'admin' ? 'admin' : null);
+            state.currentRole = isOwner ? 'owner' : (isAdmin ? 'admin' : (isModerator ? 'moderator' : null));
+
+            // Set staff permissions for preview
+            if (isOwner || isAdmin) {
+                state.staffPermissions = ['bulk_product_upload'];
+            } else if (isModerator) {
+                state.staffPermissions = urlParams.get('perm') === 'bulk' ? ['bulk_product_upload'] : [];
+            } else {
+                state.staffPermissions = [];
+            }
+
+            state.adminUsers = [
+                { id: '00000000-0000-0000-0000-000000000004', email: 'store@stocksense.io', full_name: 'Sarah Business Store', role: 'member', is_suspended: false, created_at: new Date(Date.now() - 30 * 86400000).toISOString(), last_sign_in_at: new Date().toISOString() },
+                { id: '00000000-0000-0000-0000-000000000005', email: 'chidi@electronics.ng', full_name: 'Chidi Electronics Lagos', role: 'member', is_suspended: false, created_at: new Date(Date.now() - 20 * 86400000).toISOString(), last_sign_in_at: new Date().toISOString() },
+                { id: '00000000-0000-0000-0000-000000000006', email: 'amina@boutique.ng', full_name: 'Amina Fashion & Fabrics', role: 'member', is_suspended: false, created_at: new Date(Date.now() - 15 * 86400000).toISOString(), last_sign_in_at: new Date().toISOString() },
+                { id: '00000000-0000-0000-0000-000000000003', email: 'moderator@stocksense.io', full_name: 'Tunde Operations (Staff)', role: 'moderator', is_suspended: false, created_at: new Date(Date.now() - 10 * 86400000).toISOString(), last_sign_in_at: new Date().toISOString() }
+            ];
+            state.adminTotalUsers = state.adminUsers.length;
 
             state.products = [
                 { id: 'p1', user_id: mockUser.id, name: 'USB-C Fast Charger', sku: 'CHG-1024', category: 'Chargers', unit_cost: 1500, selling_price: 3500, quantity: 3, minimum_stock: 10, emoji: '🔌', supplier: 'Lagos Tech Dist' },
@@ -256,7 +284,7 @@
             $('app-root').style.display = '';
 
             if (window.location.hash === '#admin') {
-                if (isAdminOrOwner()) {
+                if (isAdminOrOwner() || canBulkUpload()) {
                     go('admin');
                 } else {
                     window.location.hash = '';
@@ -323,8 +351,9 @@
             return;
         }
 
-        // Fetch administrative role
+        // Fetch administrative role & staff permissions
         state.currentRole = await fetchUserRole(user.id);
+        state.staffPermissions = await fetchStaffPermissions(user.id);
 
         // Update UI
         updateUserSidebarInfo(user, profile, state.currentRole);
@@ -338,7 +367,7 @@
 
         // Check if navigated directly to #admin
         if (window.location.hash === '#admin') {
-            if (isAdminOrOwner()) {
+            if (isAdminOrOwner() || canBulkUpload()) {
                 go('admin');
             } else {
                 go('dashboard');
@@ -397,8 +426,28 @@
         }
     }
 
+    async function fetchStaffPermissions(userId) {
+        if (!userId) return [];
+        try {
+            const { data, error } = await supabase
+                .from('staff_permissions')
+                .select('permission')
+                .eq('user_id', userId);
+
+            if (error || !data) return [];
+            return data.map(x => x.permission);
+        } catch {
+            return [];
+        }
+    }
+
     function isAdminOrOwner() {
         return state.currentRole === 'owner' || state.currentRole === 'admin';
+    }
+
+    function canBulkUpload() {
+        if (state.currentRole === 'owner' || state.currentRole === 'admin') return true;
+        return Array.isArray(state.staffPermissions) && state.staffPermissions.includes('bulk_product_upload');
     }
 
     function updateUserSidebarInfo(user, profile, role) {
@@ -413,9 +462,10 @@
         if (avatarEl) avatarEl.textContent = (displayName[0] || 'U').toUpperCase();
 
         if (adminBtn) {
-            if (role === 'owner' || role === 'admin') {
+            if (role === 'owner' || role === 'admin' || canBulkUpload()) {
                 adminBtn.classList.remove('hide');
-                adminBtn.querySelector('.nav-badge').textContent = role.toUpperCase();
+                const badgeText = (role === 'owner' || role === 'admin') ? role.toUpperCase() : 'STAFF';
+                adminBtn.querySelector('.nav-badge').textContent = badgeText;
             } else {
                 adminBtn.classList.add('hide');
             }
@@ -2159,21 +2209,32 @@
         };
     }
 
-    function openAssignRoleModal(userId, currentRole) {
+    async function openAssignRoleModal(userId, currentRole) {
         if (state.currentRole !== 'owner') {
-            notify('Only the Platform Owner can assign administrator roles.', 'error');
+            notify('Only the Platform Owner can assign administrator roles and staff permissions.', 'error');
             return;
         }
 
         const user = state.adminUsers.find(u => u.id === userId);
         if (!user) return;
 
+        let hasBulkUpload = false;
+        try {
+            const { data } = await supabase
+                .from('staff_permissions')
+                .select('permission')
+                .eq('user_id', userId)
+                .eq('permission', 'bulk_product_upload')
+                .maybeSingle();
+            if (data) hasBulkUpload = true;
+        } catch {}
+
         $('modal').innerHTML = `
             <div class="modalbg" id="modal-bg">
-                <form class="modal" id="form-role">
-                    <h2>Assign Administrative Role</h2>
+                <form class="modal" id="form-role" style="max-width:480px">
+                    <h2>Assign Administrative Role & Permissions</h2>
                     <p>Appoint administrator permissions for <b>${esc(user.full_name)}</b> (${esc(user.email)})</p>
-                    <div class="fg full" style="margin-bottom:16px">
+                    <div class="fg full" style="margin-bottom:14px">
                         <label>Platform Role *</label>
                         <select class="field" id="select-new-role">
                             <option value="none" ${!currentRole || currentRole === 'member' ? 'selected' : ''}>Standard Member (No administrative access)</option>
@@ -2181,12 +2242,23 @@
                             <option value="admin" ${currentRole === 'admin' ? 'selected' : ''}>Administrator (Full platform administration)</option>
                         </select>
                     </div>
+
+                    <div class="fg full" style="margin-bottom:16px;padding:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px" id="fg-perm-box">
+                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                            <input type="checkbox" id="check-perm-bulk" ${hasBulkUpload ? 'checked' : ''} style="width:18px;height:18px;margin-top:2px">
+                            <div>
+                                <b style="color:#fff">Bulk Product Upload Access (<code>bulk_product_upload</code>)</b>
+                                <div class="muted" style="font-size:12px;margin-top:2px">Authorizes staff member to upload product catalogues into customer accounts via CSV. Available only to Moderator or Admin staff.</div>
+                            </div>
+                        </label>
+                    </div>
+
                     <div class="auth-notice info">
-                        <b>Privilege Note:</b> Platform Administrators can view registered user counts, manage suspensions, and review audit logs. Only the Owner can modify administrator roles.
+                        <b>Privilege Note:</b> Platform Administrators can view registered user counts, manage suspensions, and review audit logs. Only the Owner can modify administrator roles and permissions.
                     </div>
                     <div class="actions">
                         <button type="button" class="btn secondary" id="modal-cancel">Cancel</button>
-                        <button class="btn primary" id="modal-submit">Update Role</button>
+                        <button class="btn primary" id="modal-submit">Update Role & Permissions</button>
                     </div>
                 </form>
             </div>
@@ -2195,30 +2267,54 @@
         $('modal-cancel').onclick = closeModal;
         $('modal-bg').onclick = e => { if (e.target.id === 'modal-bg') closeModal(); };
 
+        const roleSelect = $('select-new-role');
+        const permBox = $('fg-perm-box');
+        const permCheck = $('check-perm-bulk');
+        const updatePermState = () => {
+            if (roleSelect.value === 'none') {
+                permBox.style.opacity = '0.4';
+                permCheck.disabled = true;
+                permCheck.checked = false;
+            } else {
+                permBox.style.opacity = '1';
+                permCheck.disabled = false;
+            }
+        };
+        roleSelect.onchange = updatePermState;
+        updatePermState();
+
         $('form-role').onsubmit = async e => {
             e.preventDefault();
             const newRole = $('select-new-role').value;
+            const wantBulkUpload = $('check-perm-bulk').checked;
             const btn = $('modal-submit');
             btn.disabled = true;
             btn.textContent = 'Updating...';
 
             try {
-                // Enforce server-side authorization RPC
-                const { error } = await supabase.rpc('admin_assign_role', {
+                // 1. Assign Role
+                const { error: roleErr } = await supabase.rpc('admin_assign_role', {
                     p_target_user_id: userId,
                     p_role: newRole
                 });
+                if (roleErr) throw roleErr;
 
-                if (error) {
-                    throw error;
+                // 2. Assign/Revoke Permission if staff
+                if (newRole !== 'none') {
+                    const { error: permErr } = await supabase.rpc('admin_set_staff_permission', {
+                        p_target_user_id: userId,
+                        p_permission: 'bulk_product_upload',
+                        p_granted: wantBulkUpload
+                    });
+                    if (permErr) console.warn('Permission update warning:', permErr.message);
                 }
 
                 closeModal();
-                notify('Administrator role updated successfully.', 'success');
+                notify('Role and staff permissions updated successfully.', 'success');
                 await loadAdminUsers();
             } catch (err) {
                 btn.disabled = false;
-                btn.textContent = 'Update Role';
+                btn.textContent = 'Update Role & Permissions';
                 notify(err.message || 'Role assignment failed.', 'error');
             }
         };
@@ -2237,6 +2333,7 @@
                 if ($('setting-platform-name')) $('setting-platform-name').value = state.platformSettings.platform_name || 'StockSense';
                 if ($('setting-currency-symbol')) $('setting-currency-symbol').value = state.platformSettings.currency_symbol || '₦';
                 if ($('setting-low-stock')) $('setting-low-stock').value = state.platformSettings.low_stock_default || 5;
+                if ($('setting-whatsapp')) $('setting-whatsapp').value = state.platformSettings.support_whatsapp || '';
             }
         } catch (err) {
             console.warn('Could not load platform settings table:', err);
@@ -2304,7 +2401,8 @@
         movements: ['Stock Movements', 'Track sales, restocking, and inventory adjustments.'],
         advisor: ['StockSense Adviser', 'Get practical guidance for managing your stock.'],
         reports: ['Reports', 'Understand your inventory performance.'],
-        admin: ['Platform Administration', 'Platform overview, user accounts, security roles and audit logs.']
+        admin: ['Platform Administration', 'Platform overview, user accounts, security roles and audit logs.'],
+        assistance: ['How Can We Help You?', 'Choose the kind of assistance you need. Our team will guide you through the next steps.']
     };
 
     function go(pageId) {
@@ -2313,7 +2411,7 @@
                 showAuthScreen('signin');
                 return;
             }
-            if (!isAdminOrOwner()) {
+            if (!isAdminOrOwner() && !canBulkUpload()) {
                 window.location.hash = '';
                 notify('Access denied. Administrator privileges required.', 'error');
                 go('dashboard');
@@ -2321,6 +2419,18 @@
             }
             window.location.hash = '#admin';
             loadAdminData();
+
+            // If user is a staff member with bulk upload permission but not full admin/owner
+            if (state.currentRole === 'moderator' && canBulkUpload()) {
+                switchAdminTab('bulk-upload');
+                document.querySelectorAll('.admin-nav-tab').forEach(t => {
+                    t.style.display = (t.dataset.adminTab === 'bulk-upload') ? '' : 'none';
+                });
+            } else {
+                document.querySelectorAll('.admin-nav-tab').forEach(t => {
+                    t.style.display = '';
+                });
+            }
         } else {
             if (window.location.hash === '#admin') {
                 window.location.hash = '';
@@ -2342,6 +2452,14 @@
         } else if (pageHeaders[pageId]) {
             if ($('title')) $('title').textContent = pageHeaders[pageId][0];
             if ($('subtitle')) $('subtitle').textContent = pageHeaders[pageId][1];
+        }
+
+        if (pageId === 'assistance') {
+            const hasWhatsapp = !!(state.platformSettings.support_whatsapp || window.STOCKSENSE_WHATSAPP);
+            const noWaEl = $('assistance-no-whatsapp');
+            if (noWaEl) noWaEl.style.display = hasWhatsapp ? 'none' : 'block';
+            const detailPanel = $('assistance-detail-panel');
+            if (detailPanel) detailPanel.style.display = 'none';
         }
 
         // Add Product button belongs ONLY on Product Inventory
@@ -2653,6 +2771,638 @@
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Customer-Facing Inventory Setup Assistance
+    // -------------------------------------------------------------------------
+    function openAssistanceUpload() {
+        state.activeAssistanceOption = 'upload';
+        const detailPanel = $('assistance-detail-panel');
+        if (!detailPanel) return;
+
+        $('assistance-detail-title').innerHTML = '📦 Option A: Help Upload My Products';
+        $('assistance-detail-content').innerHTML = `
+            <p style="margin-bottom:16px;color:var(--text);font-size:14px;line-height:1.6">
+                Have a long list of products or need help setting up your inventory? Our team can assist you with preparing and uploading your product catalogue to your StockSense account.
+            </p>
+            <div class="assistance-steps-list">
+                <div class="assistance-step-item">
+                    <span class="step-num">1</span>
+                    <div>
+                        <b>Product Catalogue Review</b>
+                        <p>The StockSense team will discuss the product list and information required (product names, prices, categories, and initial quantities).</p>
+                    </div>
+                </div>
+                <div class="assistance-step-item">
+                    <span class="step-num">2</span>
+                    <div>
+                        <b>Spreadsheet Formatting & Guidance</b>
+                        <p>You may be asked to provide a properly formatted spreadsheet or other agreed product details using our standard template.</p>
+                    </div>
+                </div>
+                <div class="assistance-step-item">
+                    <span class="step-num">3</span>
+                    <div>
+                        <b>Service Confirmation via WhatsApp</b>
+                        <p>The team will confirm the service arrangements, pricing, and next steps through WhatsApp before any upload takes place.</p>
+                    </div>
+                </div>
+                <div class="assistance-step-item">
+                    <span class="step-num">4</span>
+                    <div>
+                        <b>Secure Staff Upload Workflow</b>
+                        <p>Product uploads will be carried out by authorized team members using our verified staff workflow. Products and stock movements appear in your account automatically.</p>
+                    </div>
+                </div>
+                <div class="assistance-step-item" style="border-color:rgba(239,68,68,0.3);background:rgba(239,68,68,0.04)">
+                    <span class="step-num" style="background:#ef4444;color:#fff">🔒</span>
+                    <div>
+                        <b style="color:#ef4444">Strict Password Security Rule</b>
+                        <p><strong style="color:#fff">Never share your StockSense password.</strong> Our team will never ask for your password or direct login access. Authorized staff import products securely from the backend without access to your credentials.</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        detailPanel.style.display = 'block';
+        detailPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function openAssistanceTraining() {
+        state.activeAssistanceOption = 'training';
+        const detailPanel = $('assistance-detail-panel');
+        if (!detailPanel) return;
+
+        $('assistance-detail-title').innerHTML = '🎓 Option B: Train Me or My Staff';
+        $('assistance-detail-content').innerHTML = `
+            <p style="margin-bottom:16px;color:var(--text);font-size:14px;line-height:1.6">
+                Would you like to learn how to add products, record sales and restocking, monitor stock levels, and use StockSense confidently? Request training for yourself or your staff.
+            </p>
+            <div class="assistance-steps-list">
+                <div class="assistance-step-item">
+                    <span class="step-num">1</span>
+                    <div>
+                        <b>Practical Inventory Skills</b>
+                        <p>Learn end-to-end workflows: cataloguing products, setting low-stock reorder thresholds, recording sales, restocking incoming orders, and managing inventory adjustments.</p>
+                    </div>
+                </div>
+                <div class="assistance-step-item">
+                    <span class="step-num">2</span>
+                    <div>
+                        <b>Flexible Format & Schedule</b>
+                        <p>Discuss your team's specific training needs, preferred delivery format (remote video walk-through or on-site where available), schedule, and participant count.</p>
+                    </div>
+                </div>
+                <div class="assistance-step-item">
+                    <span class="step-num">3</span>
+                    <div>
+                        <b>Direct WhatsApp Consultation</b>
+                        <p>Confirm the available training options, arrangements, pricing, and next steps directly with the StockSense team. No automated commitments or hidden fees.</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        detailPanel.style.display = 'block';
+        detailPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function closeAssistanceDetail() {
+        const detailPanel = $('assistance-detail-panel');
+        if (detailPanel) detailPanel.style.display = 'none';
+        state.activeAssistanceOption = null;
+    }
+
+    function handleContinueToWhatsApp() {
+        const configuredNumber = (state.platformSettings.support_whatsapp || window.STOCKSENSE_WHATSAPP || '').trim();
+        const digitsOnly = configuredNumber.replace(/[^0-9]/g, '');
+
+        if (!digitsOnly) {
+            notify('StockSense support WhatsApp number is not configured yet. Please configure it in Platform Settings or contact your administrator.', 'warning');
+            return;
+        }
+
+        let prefilledMessage = '';
+        if (state.activeAssistanceOption === 'upload') {
+            prefilledMessage = 'Hello StockSense team, I need assistance uploading the products in my shop to StockSense. Please explain the process, requirements, pricing, and next steps.';
+        } else if (state.activeAssistanceOption === 'training') {
+            prefilledMessage = 'Hello StockSense team, I would like assistance learning how to use StockSense. I need training for myself or my staff. Please explain the available options, pricing, and next steps.';
+        } else {
+            prefilledMessage = 'Hello StockSense team, I need assistance with setting up my inventory.';
+        }
+
+        const waUrl = `https://wa.me/${digitsOnly}?text=${encodeURIComponent(prefilledMessage)}`;
+        window.open(waUrl, '_blank', 'noopener,noreferrer');
+    }
+
+    // -------------------------------------------------------------------------
+    // Staff Bulk Product Upload Workflow
+    // -------------------------------------------------------------------------
+    function downloadCsvTemplate() {
+        const headers = ['name', 'sku', 'category', 'unit_cost', 'selling_price', 'quantity', 'minimum_stock', 'supplier', 'emoji'];
+        const sampleRows = [
+            ['Wireless Optical Mouse', 'MOU-001', 'Electronics', '4500', '7500', '25', '5', 'TechSupplies Ltd', '🖱️'],
+            ['USB-C Fast Charging Cable 2m', 'CAB-002', 'Accessories', '1500', '3000', '50', '10', 'CableWorld', '🔌'],
+            ['Cotton Casual T-Shirt', 'TSH-003', 'Apparel', '2800', '5000', '15', '3', 'Apex Textiles', '👕']
+        ];
+
+        const csvContent = '\uFEFF' + [
+            headers.join(','),
+            ...sampleRows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(','))
+        ].join('\r\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'stocksense_product_import_template.csv');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+
+    function parseCsvText(text) {
+        if (!text) return [];
+        if (text.charCodeAt(0) === 0xFEFF) {
+            text = text.slice(1);
+        }
+
+        const lines = [];
+        let row = [];
+        let col = '';
+        let insideQuote = false;
+
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const nextChar = text[i + 1];
+
+            if (char === '"') {
+                if (insideQuote && nextChar === '"') {
+                    col += '"';
+                    i++;
+                } else {
+                    insideQuote = !insideQuote;
+                }
+            } else if (char === ',' && !insideQuote) {
+                row.push(col);
+                col = '';
+            } else if ((char === '\r' || char === '\n') && !insideQuote) {
+                if (char === '\r' && nextChar === '\n') {
+                    i++;
+                }
+                row.push(col);
+                if (row.length > 1 || (row.length === 1 && row[0].trim() !== '')) {
+                    lines.push(row);
+                }
+                row = [];
+                col = '';
+            } else {
+                col += char;
+            }
+        }
+        if (col.length > 0 || row.length > 0) {
+            row.push(col);
+            if (row.length > 1 || (row.length === 1 && row[0].trim() !== '')) {
+                lines.push(row);
+            }
+        }
+
+        if (lines.length < 2) return [];
+
+        const headers = lines[0].map(h => h.trim().toLowerCase().replace(/^["']|["']$/g, ''));
+        const objects = [];
+
+        for (let r = 1; r < lines.length; r++) {
+            const rowValues = lines[r];
+            const obj = { _line: r + 1 };
+            headers.forEach((h, colIdx) => {
+                obj[h] = rowValues[colIdx] !== undefined ? rowValues[colIdx].trim() : '';
+            });
+            objects.push(obj);
+        }
+
+        return objects;
+    }
+
+    function validateCsvRows(rawRows, existingUserSkus = new Set()) {
+        const validRows = [];
+        const invalidRows = [];
+        const errors = [];
+        const seenSkusInFile = new Set();
+
+        rawRows.forEach((row, idx) => {
+            const lineNum = row._line || (idx + 2);
+            const rowErrors = [];
+
+            // Product name (required)
+            const name = (row.name || row['product name'] || '').trim();
+            if (!name) {
+                rowErrors.push('Product name is required');
+            }
+
+            // SKU (optional, but must be unique)
+            let sku = (row.sku || '').trim();
+            if (sku) {
+                const lowerSku = sku.toLowerCase();
+                if (seenSkusInFile.has(lowerSku)) {
+                    rowErrors.push(`Duplicate SKU "${sku}" within CSV file`);
+                } else {
+                    seenSkusInFile.add(lowerSku);
+                }
+                if (existingUserSkus && existingUserSkus.has(lowerSku)) {
+                    rowErrors.push(`SKU "${sku}" already exists in customer catalog`);
+                }
+            }
+
+            // Category (defaults to General / Other)
+            const category = (row.category || 'General').trim() || 'General';
+
+            // Selling price (required, non-negative)
+            const sellingRaw = row.selling_price || row['selling price'] || row.price;
+            const sellingPrice = sellingRaw !== undefined && sellingRaw !== '' ? Number(sellingRaw) : NaN;
+            if (isNaN(sellingPrice) || sellingPrice < 0) {
+                rowErrors.push('Selling price must be a valid non-negative number');
+            }
+
+            // Unit cost / Cost price (optional, non-negative)
+            const costRaw = row.unit_cost || row['cost price'] || row.cost || '0';
+            const unitCost = costRaw !== '' ? Number(costRaw) : 0;
+            if (isNaN(unitCost) || unitCost < 0) {
+                rowErrors.push('Cost price must be a non-negative number');
+            }
+
+            // Quantity (optional integer >= 0)
+            const qtyRaw = row.quantity || row['initial quantity'] || row.qty || '0';
+            const quantity = qtyRaw !== '' ? parseInt(qtyRaw, 10) : 0;
+            if (isNaN(quantity) || quantity < 0) {
+                rowErrors.push('Quantity must be a non-negative whole number');
+            }
+
+            // Minimum stock (optional integer >= 0)
+            const minRaw = row.minimum_stock || row['min stock'] || row['minimum stock level'] || '5';
+            const minimumStock = minRaw !== '' ? parseInt(minRaw, 10) : 5;
+            if (isNaN(minimumStock) || minimumStock < 0) {
+                rowErrors.push('Minimum stock must be a non-negative whole number');
+            }
+
+            // Supplier & emoji
+            const supplier = (row.supplier || '').trim();
+            const emoji = (row.emoji || '📦').trim() || '📦';
+
+            if (rowErrors.length > 0) {
+                invalidRows.push({ ...row, errors: rowErrors });
+                errors.push(`Row ${lineNum} (${name || 'Unnamed'}): ${rowErrors.join(', ')}`);
+            } else {
+                validRows.push({
+                    name,
+                    sku: sku || null,
+                    category,
+                    unit_cost: unitCost,
+                    selling_price: sellingPrice,
+                    quantity,
+                    minimum_stock: minimumStock,
+                    supplier: supplier || null,
+                    emoji
+                });
+            }
+        });
+
+        return {
+            validRows,
+            invalidRows,
+            errors,
+            totalRows: rawRows.length
+        };
+    }
+
+    function initAdminBulkUploadView() {
+        const stepFile = $('bulk-step-file');
+        if (stepFile) stepFile.classList.add('disabled');
+        const selectedBanner = $('bulk-selected-customer-card');
+        if (selectedBanner) selectedBanner.style.display = 'none';
+        const resultsEl = $('bulk-customer-results');
+        if (resultsEl) resultsEl.style.display = 'none';
+        const previewArea = $('bulk-csv-preview-area');
+        if (previewArea) previewArea.style.display = 'none';
+        const resultNotice = $('bulk-import-result');
+        if (resultNotice) resultNotice.style.display = 'none';
+
+        state.bulkUploadState = {
+            targetCustomer: null,
+            existingSkus: new Set(),
+            parsedProducts: [],
+            validProducts: [],
+            invalidRows: []
+        };
+    }
+
+    async function searchBulkCustomer() {
+        const searchInput = $('bulk-customer-search');
+        const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
+        const resultsEl = $('bulk-customer-results');
+        if (!resultsEl) return;
+
+        resultsEl.innerHTML = '<div class="muted" style="padding:10px">Searching customers...</div>';
+        resultsEl.style.display = 'flex';
+
+        try {
+            let matches = [];
+            if (state.adminUsers && state.adminUsers.length > 0) {
+                matches = state.adminUsers.filter(u => {
+                    if (u.is_suspended) return false;
+                    const name = (u.full_name || '').toLowerCase();
+                    const email = (u.email || '').toLowerCase();
+                    const id = (u.id || '').toLowerCase();
+                    return !query || name.includes(query) || email.includes(query) || id.includes(query);
+                });
+            } else {
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('id, full_name, is_suspended, created_at')
+                    .eq('is_suspended', false)
+                    .limit(20);
+
+                if (error) throw error;
+                matches = data || [];
+                if (query) {
+                    matches = matches.filter(u => (u.full_name || '').toLowerCase().includes(query) || (u.id || '').toLowerCase().includes(query));
+                }
+            }
+
+            if (!matches.length) {
+                resultsEl.innerHTML = '<div class="muted" style="padding:10px">No matching active customers found.</div>';
+                return;
+            }
+
+            resultsEl.innerHTML = matches.map(u => {
+                const initial = (u.full_name || u.email || 'C')[0].toUpperCase();
+                return `
+                    <div class="bulk-customer-card">
+                        <div style="display:flex;align-items:center;gap:12px">
+                            <div style="width:34px;height:34px;border-radius:50%;background:rgba(168,85,247,0.2);color:#c084fc;display:flex;align-items:center;justify-content:center;font-weight:700">
+                                ${initial}
+                            </div>
+                            <div>
+                                <b style="color:#fff;font-size:14px">${esc(u.full_name || 'Customer Account')}</b>
+                                <div style="font-size:12px;color:var(--lav)">${esc(u.email || 'Email Protected')} · <span style="font-family:monospace">${esc(u.id.substring(0, 8))}…</span></div>
+                            </div>
+                        </div>
+                        <button class="btn primary btn-sm" type="button" data-select-cust-id="${esc(u.id)}">
+                            Select Customer
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            resultsEl.innerHTML = `<div class="auth-notice error" style="padding:8px">Search failed: ${esc(err.message)}</div>`;
+        }
+    }
+
+    async function selectBulkCustomer(customerId) {
+        let user = (state.adminUsers || []).find(u => u.id === customerId);
+        if (!user) {
+            user = { id: customerId, full_name: 'Customer Account', email: 'customer@stocksense.io' };
+        }
+
+        state.bulkUploadState.targetCustomer = user;
+        state.bulkUploadState.existingSkus = new Set();
+
+        const initial = (user.full_name || user.email || 'C')[0].toUpperCase();
+        if ($('bulk-selected-avatar')) $('bulk-selected-avatar').textContent = initial;
+        if ($('bulk-selected-name')) $('bulk-selected-name').textContent = user.full_name || 'Customer Account';
+        if ($('bulk-selected-email')) $('bulk-selected-email').textContent = user.email || 'Customer Account';
+        if ($('bulk-selected-id')) $('bulk-selected-id').textContent = `ID: ${user.id}`;
+
+        if ($('bulk-selected-customer-card')) $('bulk-selected-customer-card').style.display = 'flex';
+        if ($('bulk-customer-results')) $('bulk-customer-results').style.display = 'none';
+
+        const stepFile = $('bulk-step-file');
+        if (stepFile) stepFile.classList.remove('disabled');
+
+        try {
+            const { data } = await supabase
+                .from('products')
+                .select('sku')
+                .eq('user_id', user.id);
+            if (data && Array.isArray(data)) {
+                data.forEach(p => {
+                    if (p.sku) state.bulkUploadState.existingSkus.add(p.sku.toLowerCase().trim());
+                });
+            }
+        } catch (err) {
+            console.warn('Could not load existing customer SKUs:', err);
+        }
+
+        notify(`Target customer selected: ${user.full_name || user.email}`, 'info');
+    }
+
+    function changeBulkCustomer() {
+        state.bulkUploadState.targetCustomer = null;
+        state.bulkUploadState.existingSkus = new Set();
+        if ($('bulk-selected-customer-card')) $('bulk-selected-customer-card').style.display = 'none';
+        if ($('bulk-step-file')) $('bulk-step-file').classList.add('disabled');
+        clearBulkCsvFile();
+    }
+
+    function clearBulkCsvFile() {
+        const input = $('bulk-csv-input');
+        if (input) input.value = '';
+        state.bulkUploadState.parsedProducts = [];
+        state.bulkUploadState.validProducts = [];
+        state.bulkUploadState.invalidRows = [];
+        const previewArea = $('bulk-csv-preview-area');
+        if (previewArea) previewArea.style.display = 'none';
+        const resultNotice = $('bulk-import-result');
+        if (resultNotice) resultNotice.style.display = 'none';
+    }
+
+    function handleBulkCsvFileSelect(file) {
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv') {
+            notify('Please select a valid CSV file (.csv).', 'error');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = e => {
+            try {
+                const text = e.target.result;
+                const rawRows = parseCsvText(text);
+
+                if (rawRows.length === 0) {
+                    notify('The selected CSV file appears to be empty or contains only headers.', 'warning');
+                    return;
+                }
+
+                const { validRows, invalidRows, errors, totalRows } = validateCsvRows(
+                    rawRows,
+                    state.bulkUploadState.existingSkus
+                );
+
+                state.bulkUploadState.parsedProducts = rawRows;
+                state.bulkUploadState.validProducts = validRows;
+                state.bulkUploadState.invalidRows = invalidRows;
+
+                if ($('bulk-valid-count')) $('bulk-valid-count').textContent = `${validRows.length} Valid Rows`;
+                if ($('bulk-invalid-count')) {
+                    if (invalidRows.length > 0) {
+                        $('bulk-invalid-count').textContent = `${invalidRows.length} Invalid Rows`;
+                        $('bulk-invalid-count').style.display = 'inline-block';
+                    } else {
+                        $('bulk-invalid-count').style.display = 'none';
+                    }
+                }
+                if ($('bulk-total-count')) $('bulk-total-count').textContent = `${totalRows} Total Rows in File`;
+
+                const errorsBox = $('bulk-csv-errors');
+                const errorsList = $('bulk-errors-list');
+                if (errorsBox && errorsList) {
+                    if (errors.length > 0) {
+                        errorsList.innerHTML = errors.slice(0, 10).map(err => `<li>${esc(err)}</li>`).join('');
+                        if (errors.length > 10) {
+                            errorsList.innerHTML += `<li style="color:var(--muted)">…and ${errors.length - 10} more row issues.</li>`;
+                        }
+                        errorsBox.style.display = 'block';
+                    } else {
+                        errorsBox.style.display = 'none';
+                    }
+                }
+
+                const tbody = $('bulk-preview-tbody');
+                if (tbody) {
+                    const previewRows = rawRows.slice(0, 25);
+                    tbody.innerHTML = previewRows.map((r, i) => {
+                        const isInvalid = invalidRows.some(inv => inv._line === r._line);
+                        const statusBadge = isInvalid
+                            ? `<span class="badge badge-suspended">Rejected</span>`
+                            : `<span class="badge badge-active">Ready</span>`;
+                        return `
+                            <tr style="${isInvalid ? 'opacity:0.6;background:rgba(239,68,68,0.06)' : ''}">
+                                <td>${i + 1}</td>
+                                <td><b>${esc(r.name || r['product name'] || '—')}</b></td>
+                                <td><code>${esc(r.sku || '—')}</code></td>
+                                <td>${esc(r.category || 'General')}</td>
+                                <td>${cash(r.selling_price || 0)}</td>
+                                <td>${cash(r.unit_cost || 0)}</td>
+                                <td>${fmt(r.quantity || 0)}</td>
+                                <td>${fmt(r.minimum_stock || 5)}</td>
+                                <td>${statusBadge}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+                const confirmBtn = $('btn-confirm-bulk-import');
+                if (confirmBtn) {
+                    confirmBtn.disabled = validRows.length === 0;
+                    confirmBtn.textContent = `Confirm & Import ${validRows.length} Products →`;
+                }
+
+                if ($('bulk-csv-preview-area')) $('bulk-csv-preview-area').style.display = 'block';
+                if ($('bulk-import-result')) $('bulk-import-result').style.display = 'none';
+
+            } catch (err) {
+                notify('Failed to parse CSV file: ' + err.message, 'error');
+            }
+        };
+        reader.readAsText(file);
+    }
+
+    async function executeBulkProductImport() {
+        if (!canBulkUpload()) {
+            notify('Access denied: Staff bulk upload permission required.', 'error');
+            return;
+        }
+
+        const target = state.bulkUploadState.targetCustomer;
+        if (!target) {
+            notify('Please select a target customer account first.', 'error');
+            return;
+        }
+
+        const validProducts = state.bulkUploadState.validProducts;
+        if (!validProducts || validProducts.length === 0) {
+            notify('No valid products to import.', 'warning');
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Import ${validProducts.length} verified products into account for "${target.full_name || target.email}"?\n\nThis will add the products to their catalog and record initial inventory movements.`
+        );
+        if (!confirmed) return;
+
+        const btn = $('btn-confirm-bulk-import');
+        btn.disabled = true;
+        btn.textContent = 'Importing Products…';
+
+        try {
+            const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+            const urlParams = new URLSearchParams(window.location.search);
+            const isPreview = isLocalhost && urlParams.get('preview');
+
+            let result;
+            if (isPreview) {
+                const totalSubmitted = validProducts.length + state.bulkUploadState.invalidRows.length;
+                result = {
+                    success: true,
+                    total_submitted: totalSubmitted,
+                    imported_count: validProducts.length,
+                    failed_count: state.bulkUploadState.invalidRows.length,
+                    failed_rows: []
+                };
+
+                state.adminAuditLogs.unshift({
+                    id: 'mock-audit-' + Date.now(),
+                    actor_email: state.currentUser ? state.currentUser.email : 'staff@stocksense.io',
+                    action: 'BULK_PRODUCT_IMPORT',
+                    target_type: 'user',
+                    target_id: target.id,
+                    details: {
+                        imported_count: validProducts.length,
+                        customer: target.full_name || target.email
+                    },
+                    created_at: new Date().toISOString()
+                });
+            } else {
+                const { data, error } = await supabase.rpc('staff_bulk_import_products', {
+                    p_target_user_id: target.id,
+                    p_products: validProducts
+                });
+
+                if (error) throw error;
+                result = data;
+            }
+
+            const resultNotice = $('bulk-import-result');
+            if (resultNotice) {
+                resultNotice.className = 'auth-notice ' + (result.imported_count > 0 ? 'info' : 'error');
+                resultNotice.innerHTML = `
+                    <b>Import Operation Completed:</b>
+                    <ul style="margin:6px 0 0 16px;padding:0">
+                        <li><b>Target Customer:</b> ${esc(target.full_name || target.email)}</li>
+                        <li><b>Successfully Imported:</b> ${result.imported_count} products</li>
+                        <li><b>Rejected / Skipped:</b> ${result.failed_count || state.bulkUploadState.invalidRows.length} rows</li>
+                    </ul>
+                    <div style="margin-top:8px;font-size:12px;color:var(--lav)">
+                        An official audit record has been logged for this staff onboarding operation.
+                    </div>
+                `;
+                resultNotice.style.display = 'block';
+                resultNotice.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            notify(`Import complete: ${result.imported_count} products added to ${target.full_name || target.email}`, 'success');
+
+            $('bulk-csv-input').value = '';
+            $('bulk-csv-preview-area').style.display = 'none';
+            state.bulkUploadState.validProducts = [];
+            state.bulkUploadState.parsedProducts = [];
+
+        } catch (err) {
+            btn.disabled = false;
+            btn.textContent = `Confirm & Import ${validProducts.length} Products →`;
+            notify('Import failed: ' + (err.message || 'Server error'), 'error');
+        }
+    }
+
     function switchAdminTab(tabId) {
         state.adminTab = tabId;
         document.querySelectorAll('.admin-nav-tab').forEach(b => {
@@ -2665,6 +3415,7 @@
         if (tabId === 'users') loadAdminUsers();
         if (tabId === 'settings') loadPlatformSettings();
         if (tabId === 'feedback') loadAdminFeedback();
+        if (tabId === 'bulk-upload') initAdminBulkUploadView();
     }
 
     // -------------------------------------------------------------------------
@@ -2737,6 +3488,55 @@
             return;
         }
 
+        // Setup assistance triggers
+        if (e.target.closest('#btn-assistance-upload')) {
+            openAssistanceUpload();
+            return;
+        }
+        if (e.target.closest('#btn-assistance-training')) {
+            openAssistanceTraining();
+            return;
+        }
+        if (e.target.closest('#btn-close-assistance-detail') || e.target.closest('#btn-cancel-assistance')) {
+            closeAssistanceDetail();
+            return;
+        }
+        if (e.target.closest('#btn-continue-whatsapp')) {
+            handleContinueToWhatsApp();
+            return;
+        }
+
+        // Staff Bulk Upload triggers
+        if (e.target.closest('#btn-download-csv-template')) {
+            downloadCsvTemplate();
+            return;
+        }
+        if (e.target.closest('#btn-search-customer')) {
+            searchBulkCustomer();
+            return;
+        }
+        const selectCustBtn = e.target.closest('[data-select-cust-id]');
+        if (selectCustBtn) {
+            selectBulkCustomer(selectCustBtn.dataset.selectCustId);
+            return;
+        }
+        if (e.target.closest('#btn-change-target-customer')) {
+            changeBulkCustomer();
+            return;
+        }
+        if (e.target.closest('#dropzone-clickable-area')) {
+            $('bulk-csv-input')?.click();
+            return;
+        }
+        if (e.target.closest('#btn-cancel-bulk-import')) {
+            clearBulkCsvFile();
+            return;
+        }
+        if (e.target.closest('#btn-confirm-bulk-import')) {
+            executeBulkProductImport();
+            return;
+        }
+
         // Admin actions
         const adminTabBtn = e.target.closest('[data-admin-tab]');
         if (adminTabBtn) {
@@ -2752,6 +3552,39 @@
             if (act === 'toggle-suspend') openSuspendModal(uid, adminActBtn.dataset.suspended === 'true');
             if (act === 'assign-role') openAssignRoleModal(uid, adminActBtn.dataset.role);
             return;
+        }
+    });
+
+    // File input and drag & drop for bulk upload
+    $('bulk-csv-input')?.addEventListener('change', e => {
+        if (e.target.files && e.target.files[0]) {
+            handleBulkCsvFileSelect(e.target.files[0]);
+        }
+    });
+
+    const bulkDropzone = $('bulk-file-dropzone');
+    if (bulkDropzone) {
+        bulkDropzone.addEventListener('dragover', e => {
+            e.preventDefault();
+            bulkDropzone.style.borderColor = 'var(--green)';
+        });
+        bulkDropzone.addEventListener('dragleave', e => {
+            e.preventDefault();
+            bulkDropzone.style.borderColor = 'rgba(168, 85, 247, 0.4)';
+        });
+        bulkDropzone.addEventListener('drop', e => {
+            e.preventDefault();
+            bulkDropzone.style.borderColor = 'rgba(168, 85, 247, 0.4)';
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleBulkCsvFileSelect(e.dataTransfer.files[0]);
+            }
+        });
+    }
+
+    $('bulk-customer-search')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            searchBulkCustomer();
         }
     });
 
@@ -2864,6 +3697,7 @@
             platform_name: $('setting-platform-name').value.trim() || 'StockSense',
             currency_symbol: $('setting-currency-symbol').value.trim() || '₦',
             low_stock_default: Number($('setting-low-stock').value) || 5,
+            support_whatsapp: $('setting-whatsapp')?.value.trim() || '',
             maintenance_mode: false
         };
 
@@ -2954,6 +3788,7 @@
             getUserFirstName,
             updateDashboardGreeting,
             isAdminOrOwner,
+            canBulkUpload,
             pageHeaders,
             go,
             isAppInstalled,
@@ -2964,7 +3799,17 @@
             dismissPwaPrompt,
             markPwaInstalled,
             openFeedbackModal,
-            loadAdminFeedback
+            loadAdminFeedback,
+            openAssistanceUpload,
+            openAssistanceTraining,
+            closeAssistanceDetail,
+            handleContinueToWhatsApp,
+            downloadCsvTemplate,
+            parseCsvText,
+            validateCsvRows,
+            searchBulkCustomer,
+            selectBulkCustomer,
+            executeBulkProductImport
         };
     }
 

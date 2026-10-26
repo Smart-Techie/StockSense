@@ -72,6 +72,9 @@
                     <button data-page="reports">
                         <span class="icon">▥</span>Reports & insights
                     </button>
+                    <button data-page="assistance">
+                        <span class="icon">🤝</span>Setup assistance
+                    </button>
                     <button class="admin-nav-item hide" id="nav-btn-admin" data-page="admin">
                         <span class="icon">🛡</span>Admin Portal
                         <span class="nav-badge">ADMIN</span>
@@ -181,6 +184,21 @@
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Customer-Facing Inventory Setup Assistance Section -->
+                <div class="panel setup-assistance-panel" id="sec-setup-assistance">
+                    <div class="setup-assistance-content">
+                        <div class="setup-assistance-icon">🤝</div>
+                        <div class="setup-assistance-text">
+                            <div class="eyebrow" style="color:var(--green)">INVENTORY SETUP ASSISTANCE</div>
+                            <h3>Need Help Setting Up Your Inventory?</h3>
+                            <p>Getting started or managing a large product catalogue? Our team can help you upload your products to StockSense or train you and your staff to use the platform confidently.</p>
+                        </div>
+                    </div>
+                    <button class="btn primary" id="btn-homepage-assistance" data-go="assistance" type="button">
+                        Get Setup Assistance
+                    </button>
                 </div>
 
                 <!-- StockSense Version 2.0 Roadmap Preview -->
@@ -402,7 +420,70 @@
                 </p>
             </section>
 
-            <!-- Page 6: Dedicated Platform Administration Dashboard -->
+            <!-- Page 6: Dedicated Inventory Setup Assistance Page -->
+            <section class="page" id="page-assistance">
+                <div class="panel assistance-hero-panel">
+                    <div class="eyebrow" style="color:var(--green)">DEDICATED ONBOARDING & SUPPORT</div>
+                    <h2>How Can We Help You?</h2>
+                    <p class="sub">Choose the kind of assistance you need. Our team will guide you through the next steps.</p>
+                </div>
+
+                <!-- Setup notice if WhatsApp contact is unconfigured -->
+                <div id="assistance-no-whatsapp" class="auth-notice error" style="display:none;margin-bottom:18px">
+                    <b>⚠️ Support WhatsApp Not Configured:</b> A StockSense business WhatsApp contact number has not been set yet. Platform Administrators can configure it under <b>Admin Portal → Platform Settings</b>.
+                </div>
+
+                <div class="assistance-grid">
+                    <!-- Option A: Help Upload My Products -->
+                    <div class="panel assistance-option-card">
+                        <div class="assistance-card-icon">📦</div>
+                        <h3>Help Upload My Products</h3>
+                        <p class="sub" style="margin-bottom:18px;min-height:56px">
+                            Have a long list of products or need help setting up your inventory? Our team can assist you with preparing and uploading your product catalogue to your StockSense account.
+                        </p>
+                        <button class="btn primary full" id="btn-assistance-upload" type="button">
+                            Help Upload My Products
+                        </button>
+                    </div>
+
+                    <!-- Option B: Train Me or My Staff -->
+                    <div class="panel assistance-option-card">
+                        <div class="assistance-card-icon">🎓</div>
+                        <h3>Train Me or My Staff</h3>
+                        <p class="sub" style="margin-bottom:18px;min-height:56px">
+                            Would you like to learn how to add products, record sales and restocking, monitor stock levels, and use StockSense confidently? Request training for yourself or your staff.
+                        </p>
+                        <button class="btn secondary full" id="btn-assistance-training" type="button">
+                            Request Training
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Assistance Detail & WhatsApp Confirmation Box -->
+                <div class="panel assistance-detail-panel" id="assistance-detail-panel" style="display:none;margin-top:20px">
+                    <div class="panel-head">
+                        <div>
+                            <div class="eyebrow" style="color:var(--green)" id="assistance-detail-eyebrow">UPLOAD ASSISTANCE</div>
+                            <h3 id="assistance-detail-title">Help Upload My Products</h3>
+                            <p class="sub" id="assistance-detail-sub">Follow the steps below to connect directly with the StockSense team.</p>
+                        </div>
+                        <button class="btn secondary btn-sm" id="btn-close-assistance-detail" type="button">✕ Close</button>
+                    </div>
+
+                    <div id="assistance-detail-content">
+                        <!-- Populated dynamically with step guidance -->
+                    </div>
+
+                    <div class="actions" style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08)">
+                        <button class="btn secondary" id="btn-cancel-assistance" type="button">Back</button>
+                        <button class="btn primary" id="btn-continue-whatsapp" type="button">
+                            Continue to WhatsApp →
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Page 7: Dedicated Platform Administration Dashboard -->
             <section class="page" id="page-admin">
                 <div class="admin-badge-header">
                     <span>🛡 Platform Administration</span>
@@ -412,6 +493,7 @@
                     <button class="admin-nav-tab active" data-admin-tab="overview">Overview</button>
                     <button class="admin-nav-tab" data-admin-tab="users">User Management</button>
                     <button class="admin-nav-tab" data-admin-tab="roles">Roles & Administrators</button>
+                    <button class="admin-nav-tab" data-admin-tab="bulk-upload">📦 Bulk Product Upload</button>
                     <button class="admin-nav-tab" data-admin-tab="logs">Audit Logs</button>
                     <button class="admin-nav-tab" data-admin-tab="feedback">💬 Feedback</button>
                     <button class="admin-nav-tab" data-admin-tab="settings">Platform Settings</button>
@@ -591,12 +673,120 @@
                                 <label for="setting-currency-symbol">Default Currency Symbol</label>
                                 <input class="field" id="setting-currency-symbol" value="₦">
                             </div>
+                            <div class="fg" style="margin-bottom:14px">
+                                <label for="setting-whatsapp">Business WhatsApp Number</label>
+                                <input class="field" id="setting-whatsapp" placeholder="e.g. 2348012345678 (country code, no + or spaces)">
+                                <small class="muted">Used for customer setup assistance and staff training requests.</small>
+                            </div>
                             <div class="fg" style="margin-bottom:18px">
                                 <label for="setting-low-stock">Default Low Stock Threshold</label>
                                 <input class="field" id="setting-low-stock" type="number" min="1" value="5">
                             </div>
                             <button class="btn primary" id="btn-save-settings" type="submit">Save Platform Settings</button>
                         </form>
+                    </div>
+                </div>
+
+                <!-- Admin Tab: Bulk Product Upload (Restricted to authorized staff) -->
+                <div class="admin-section" id="admin-sec-bulk-upload">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <div class="eyebrow" style="color:var(--green)">STAFF ONBOARDING WORKFLOW</div>
+                                <h3>Customer Bulk Product Upload</h3>
+                                <p class="sub">Import catalogue products directly into an authorized customer account via verified CSV.</p>
+                            </div>
+                            <button class="btn secondary" id="btn-download-csv-template" type="button">
+                                ⬇ Download CSV Template
+                            </button>
+                        </div>
+
+                        <!-- Step 1: Customer Account Lookup -->
+                        <div class="bulk-upload-step-box" id="bulk-step-customer">
+                            <h4 style="margin-bottom:8px">1. Select Target Customer Account</h4>
+                            <p class="sub" style="margin-bottom:12px">Search by store owner name, email address, or account ID.</p>
+                            
+                            <div class="toolbar" style="margin-bottom:12px">
+                                <input class="field search" id="bulk-customer-search" placeholder="Type customer email or store name to search…">
+                                <button class="btn secondary" id="btn-search-customer" type="button">Search Customer</button>
+                            </div>
+
+                            <div id="bulk-customer-results" class="bulk-customer-results" style="display:none;margin-bottom:14px">
+                                <!-- Populated dynamically with matching customer cards -->
+                            </div>
+
+                            <!-- Selected Customer Confirmation Card -->
+                            <div id="bulk-selected-customer-card" class="selected-customer-banner" style="display:none">
+                                <div class="selected-customer-avatar" id="bulk-selected-avatar">C</div>
+                                <div class="selected-customer-details">
+                                    <b id="bulk-selected-name">Customer Name</b>
+                                    <small id="bulk-selected-email">customer@email.com</small>
+                                    <div class="meta-tag" id="bulk-selected-id">ID: 00000000-0000-0000-0000-000000000000</div>
+                                </div>
+                                <button class="btn secondary btn-sm" id="btn-change-target-customer" type="button">Change Customer</button>
+                            </div>
+                        </div>
+
+                        <!-- Step 2: Upload CSV & Preview (Disabled until customer is selected) -->
+                        <div class="bulk-upload-step-box disabled" id="bulk-step-file" style="margin-top:20px">
+                            <h4 style="margin-bottom:8px">2. Upload & Validate Product CSV</h4>
+                            <p class="sub" style="margin-bottom:12px">Select a UTF-8 formatted CSV file matching the StockSense product schema.</p>
+
+                            <div class="file-upload-area" id="bulk-file-dropzone">
+                                <input type="file" id="bulk-csv-input" accept=".csv,text/csv" style="display:none">
+                                <div class="upload-dropzone-inner" id="dropzone-clickable-area">
+                                    <div class="dropzone-icon">📄</div>
+                                    <b>Choose CSV File or Drag & Drop Here</b>
+                                    <small class="muted">Columns: Product Name, SKU, Category, Selling Price, Cost Price, Initial Quantity, Minimum Stock, Supplier, Emoji</small>
+                                </div>
+                            </div>
+
+                            <!-- Validation Preview & Summary -->
+                            <div id="bulk-csv-preview-area" style="display:none;margin-top:16px">
+                                <div class="preview-metrics-bar">
+                                    <span class="badge badge-active" id="bulk-valid-count">0 Valid Rows</span>
+                                    <span class="badge badge-suspended" id="bulk-invalid-count" style="display:none">0 Invalid Rows</span>
+                                    <span class="muted" id="bulk-total-count">0 Total Rows</span>
+                                </div>
+
+                                <!-- Errors list if invalid rows exist -->
+                                <div id="bulk-csv-errors" class="auth-notice error" style="display:none;margin-top:12px">
+                                    <b>CSV Formatting Issues Detected:</b>
+                                    <ul id="bulk-errors-list" style="margin:6px 0 0 16px;padding:0;font-size:12px"></ul>
+                                </div>
+
+                                <!-- Preview Table -->
+                                <div class="tablewrap" style="margin-top:14px;max-height:300px;overflow-y:auto">
+                                    <table class="table">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Product Name</th>
+                                                <th>SKU</th>
+                                                <th>Category</th>
+                                                <th>Selling Price</th>
+                                                <th>Cost Price</th>
+                                                <th>Initial Qty</th>
+                                                <th>Min Stock</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="bulk-preview-tbody"></tbody>
+                                    </table>
+                                </div>
+
+                                <!-- Action Buttons -->
+                                <div class="actions" style="margin-top:16px">
+                                    <button class="btn secondary" id="btn-cancel-bulk-import" type="button">Clear File</button>
+                                    <button class="btn primary" id="btn-confirm-bulk-import" type="button">
+                                        Confirm & Import Products →
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Import Result Status Banner -->
+                            <div id="bulk-import-result" class="auth-notice info" style="display:none;margin-top:16px"></div>
+                        </div>
                     </div>
                 </div>
 

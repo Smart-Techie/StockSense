@@ -4,7 +4,7 @@
  * Supabase database and authentication requests bypass cache to guarantee fresh live data.
  */
 
-const CACHE_NAME = 'stocksense-v1.0.2';
+const CACHE_NAME = 'stocksense-v1.0.3';
 const APP_SHELL = [
     '/',
     '/index.html',
