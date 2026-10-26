@@ -2570,11 +2570,13 @@
                     <div class="auth-notice error" style="margin-bottom:16px;line-height:1.5;font-size:12.5px">
                         <b>Warning:</b> You are about to permanently delete the account of <b style="color:#fff">${esc(displayName)}</b> (<code>${esc(user.email || user.id)}</code>).
                         <br><br>
-                        This will permanently erase their profile, product catalogue, recorded sales, and stock movements. <b>This action is irreversible and cannot be undone.</b>
+                        This will revoke authentication credentials, purge their profile, and remove their registered products and recorded stock movements. Historical audit logs will be preserved with actor references cleared. <b>This action is irreversible and cannot be undone.</b>
                     </div>
 
+                    <div class="auth-notice error" id="delete-user-modal-error" style="display:none;margin-bottom:14px;line-height:1.4;font-size:12.5px"></div>
+
                     <div class="fg full" style="margin-bottom:16px">
-                        <label style="font-size:12px">To confirm deletion, type <b style="color:#ef4444;letter-spacing:1px">DELETE</b> below:</label>
+                        <label style="font-size:12px">To confirm permanent deletion, type <b style="color:#ef4444;letter-spacing:1px">DELETE</b> below:</label>
                         <input class="field" id="delete-user-confirm-input" placeholder="Type DELETE to confirm" autocomplete="off" required style="font-family:monospace;font-size:13px">
                     </div>
 
@@ -2593,17 +2595,24 @@
 
         const confirmInput = $('delete-user-confirm-input');
         const submitBtn = $('modal-submit-delete');
+        const cancelBtn = $('modal-cancel');
+        const errBox = $('delete-user-modal-error');
 
         confirmInput.oninput = () => {
             submitBtn.disabled = confirmInput.value.trim() !== 'DELETE';
+            if (errBox) errBox.style.display = 'none';
         };
 
         $('form-delete-user').onsubmit = async e => {
             e.preventDefault();
             if (confirmInput.value.trim() !== 'DELETE') return;
 
+            // 1. Prevent repeated clicks and display loading state
             submitBtn.disabled = true;
-            submitBtn.textContent = 'Deleting user...';
+            submitBtn.textContent = 'Deleting user account...';
+            if (cancelBtn) cancelBtn.disabled = true;
+            confirmInput.disabled = true;
+            if (errBox) errBox.style.display = 'none';
 
             const urlParams = new URLSearchParams(window.location.search);
             const previewRole = urlParams.get('preview');
@@ -2611,10 +2620,8 @@
             const isPreview = (isLocalhost || window.location.hostname.endsWith('vercel.app') || window.location.hostname === 'stocksense-psi.vercel.app') && previewRole;
 
             try {
-                // Record user id in persistent storage so it stays deleted on browser refresh
-                markUserAsDeleted(userId);
-
                 if (isPreview) {
+                    markUserAsDeleted(userId);
                     state.adminUsers = state.adminUsers.filter(u => u.id !== userId);
                     state.adminTotalUsers = Math.max(0, state.adminTotalUsers - 1);
                     try {
@@ -2637,31 +2644,21 @@
                     return;
                 }
 
-                // 1. Attempt primary server-side cascading deletion RPC
-                let deleteSuccess = false;
-                try {
-                    const { data, error } = await supabase.rpc('admin_delete_user', {
-                        p_target_user_id: userId
-                    });
-                    if (!error && data && data.success) {
-                        deleteSuccess = true;
-                    } else if (error) {
-                        console.warn('admin_delete_user RPC notice:', error.message);
-                    }
-                } catch (rpcErr) {
-                    console.warn('admin_delete_user RPC failed:', rpcErr);
+                // 2. Invoke server-side cascading deletion RPC with administrator authorization
+                const { data, error } = await supabase.rpc('admin_delete_user', {
+                    p_target_user_id: userId
+                });
+
+                if (error) {
+                    throw new Error(error.message || 'Database error occurred during user deletion.');
                 }
 
-                // 2. Direct database deletion fallback if RPC is not yet installed in Supabase
-                if (!deleteSuccess) {
-                    const { error: profileErr } = await supabase.from('profiles').delete().eq('id', userId);
-                    if (profileErr) {
-                        console.warn('Direct profile deletion notice:', profileErr.message);
-                    }
-                    await supabase.from('platform_roles').delete().eq('user_id', userId).catch(() => {});
-                    deleteSuccess = true;
+                if (!data || !data.success) {
+                    throw new Error(data?.error || 'Database rejected user deletion request.');
                 }
 
+                // 3. Deletion verified on backend: update persistent state and DOM
+                markUserAsDeleted(userId);
                 state.adminUsers = (state.adminUsers || []).filter(u => u.id !== userId);
                 state.adminTotalUsers = Math.max(0, state.adminTotalUsers - 1);
 
@@ -2669,9 +2666,17 @@
                 notify(`User "${displayName}" was permanently deleted.`, 'success');
                 await loadAdminUsers();
             } catch (err) {
+                // 4. On failure: restore buttons, preserve user record, and provide diagnostic feedback
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Permanently Delete User';
-                notify(err.message || 'Failed to delete user.', 'error');
+                if (cancelBtn) cancelBtn.disabled = false;
+                confirmInput.disabled = false;
+
+                if (errBox) {
+                    errBox.textContent = `Deletion error: ${err.message || 'Failed to delete user.'}`;
+                    errBox.style.display = 'block';
+                }
+                notify(err.message || 'Failed to delete user account.', 'error');
             }
         };
     }

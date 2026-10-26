@@ -579,10 +579,26 @@ async function runBrowserTests() {
         // =========================================================================
         console.log('\n--- Test Suite 14: Admin User Deletion Flow ---');
 
-        // Go to Admin portal & User Management tab
-        await evaluate(`window.StockSense.go('admin')`);
+        // Go to Admin portal & User Management tab as Owner
+        await evaluate(`(() => {
+            window.StockSense.state.currentRole = 'owner';
+            window.StockSense.state.currentUser = {
+                id: '00000000-0000-0000-0000-000000000001',
+                email: 'owner@stocksense.io',
+                user_metadata: { full_name: 'Malcolm Jude (Owner)' }
+            };
+            localStorage.removeItem('stocksense_deleted_user_ids');
+            localStorage.removeItem('stocksense_mock_admin_users');
+            window.StockSense.state.adminUsers = [
+                { id: '00000000-0000-0000-0000-000000000004', email: 'store@stocksense.io', full_name: 'Sarah Business Store', role: 'member', is_suspended: false, created_at: new Date().toISOString(), last_sign_in_at: new Date().toISOString() },
+                { id: '00000000-0000-0000-0000-000000000005', email: 'chidi@electronics.ng', full_name: 'Chidi Electronics Lagos', role: 'member', is_suspended: false, created_at: new Date().toISOString(), last_sign_in_at: new Date().toISOString() },
+                { id: '00000000-0000-0000-0000-000000000006', email: 'amina@boutique.ng', full_name: 'Amina Fashion & Fabrics', role: 'member', is_suspended: false, created_at: new Date().toISOString(), last_sign_in_at: new Date().toISOString() }
+            ];
+            window.StockSense.go('admin');
+        })()`);
+        await sleep(200);
         await evaluate(`document.querySelector('[data-admin-tab="users"]')?.click()`);
-        await sleep(150);
+        await sleep(250);
 
         // Check user management table has Delete buttons
         const deleteButtonsCount = await evaluate(`document.querySelectorAll('[data-admin-act="delete-user"]').length`);

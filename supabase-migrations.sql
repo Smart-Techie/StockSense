@@ -730,34 +730,61 @@ BEGIN
     END IF;
 
     -- Pre-deletion Audit Log
-    INSERT INTO public.admin_audit_logs (actor_id, action, target_type, target_id, details)
-    VALUES (
-        v_caller,
-        'USER_DELETED',
-        'user',
-        p_target_user_id::text,
-        jsonb_build_object(
-            'email', v_target_email,
-            'full_name', v_target_name,
-            'role', COALESCE(v_target_role, 'member'),
-            'deleted_at', NOW()
-        )
-    );
+    IF to_regclass('public.admin_audit_logs') IS NOT NULL THEN
+        INSERT INTO public.admin_audit_logs (actor_id, action, target_type, target_id, details)
+        VALUES (
+            v_caller,
+            'USER_DELETED',
+            'user',
+            p_target_user_id::text,
+            jsonb_build_object(
+                'email', v_target_email,
+                'full_name', v_target_name,
+                'role', COALESCE(v_target_role, 'member'),
+                'deleted_at', NOW()
+            )
+        );
+    END IF;
 
-    -- Clear references where ON DELETE SET NULL applies
-    UPDATE public.feedback SET user_id = NULL WHERE user_id = p_target_user_id;
-    UPDATE public.platform_roles SET assigned_by = NULL WHERE assigned_by = p_target_user_id;
-    UPDATE public.staff_permissions SET granted_by = NULL WHERE granted_by = p_target_user_id;
-    UPDATE public.platform_settings SET updated_by = NULL WHERE updated_by = p_target_user_id;
+    -- Clear references where ON DELETE SET NULL applies (defensive to_regclass checks)
+    IF to_regclass('public.feedback') IS NOT NULL THEN
+        EXECUTE 'UPDATE public.feedback SET user_id = NULL WHERE user_id = $1' USING p_target_user_id;
+    END IF;
 
-    -- Delete user stock movements, products, permissions, roles, and profile explicitly first
-    DELETE FROM public.stock_movements WHERE user_id = p_target_user_id;
-    DELETE FROM public.products WHERE user_id = p_target_user_id;
-    DELETE FROM public.staff_permissions WHERE user_id = p_target_user_id;
-    DELETE FROM public.platform_roles WHERE user_id = p_target_user_id;
-    DELETE FROM public.profiles WHERE id = p_target_user_id;
+    IF to_regclass('public.platform_roles') IS NOT NULL THEN
+        UPDATE public.platform_roles SET assigned_by = NULL WHERE assigned_by = p_target_user_id;
+    END IF;
 
-    -- Delete from auth.users (Cascades to any remaining auth session records)
+    IF to_regclass('public.staff_permissions') IS NOT NULL THEN
+        EXECUTE 'UPDATE public.staff_permissions SET granted_by = NULL WHERE granted_by = $1' USING p_target_user_id;
+        EXECUTE 'DELETE FROM public.staff_permissions WHERE user_id = $1' USING p_target_user_id;
+    END IF;
+
+    IF to_regclass('public.platform_settings') IS NOT NULL THEN
+        UPDATE public.platform_settings SET updated_by = NULL WHERE updated_by = p_target_user_id;
+    END IF;
+
+    -- Explicitly delete user stock movements and products in proper dependency order
+    IF to_regclass('public.stock_movements') IS NOT NULL THEN
+        DELETE FROM public.stock_movements WHERE user_id = p_target_user_id;
+        IF to_regclass('public.products') IS NOT NULL THEN
+            DELETE FROM public.stock_movements WHERE product_id IN (SELECT id FROM public.products WHERE user_id = p_target_user_id);
+        END IF;
+    END IF;
+
+    IF to_regclass('public.products') IS NOT NULL THEN
+        DELETE FROM public.products WHERE user_id = p_target_user_id;
+    END IF;
+
+    IF to_regclass('public.platform_roles') IS NOT NULL THEN
+        DELETE FROM public.platform_roles WHERE user_id = p_target_user_id;
+    END IF;
+
+    IF to_regclass('public.profiles') IS NOT NULL THEN
+        DELETE FROM public.profiles WHERE id = p_target_user_id;
+    END IF;
+
+    -- Delete from auth.users (Cascades to remaining auth session records)
     DELETE FROM auth.users WHERE id = p_target_user_id;
 
     RETURN jsonb_build_object(

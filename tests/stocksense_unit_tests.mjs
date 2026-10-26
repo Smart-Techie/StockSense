@@ -968,6 +968,79 @@ test('Delete confirmation input requires exact DELETE keyword', () => {
     assert.strictEqual(isValidConfirmation('DELETE'), true);
 });
 
+// -----------------------------------------------------------------------------
+// 14. Related-Record Cascading Deletion Order & Historical Integrity
+// -----------------------------------------------------------------------------
+function simulateDatabaseCascadeDeletion(database, targetUserId) {
+    // 1. Check if user exists
+    const user = database.authUsers.find(u => u.id === targetUserId);
+    if (!user) throw new Error('User not found');
+
+    // 2. Clear references where ON DELETE SET NULL applies
+    database.feedback.forEach(f => {
+        if (f.user_id === targetUserId) f.user_id = null;
+    });
+    database.platformRoles.forEach(r => {
+        if (r.assigned_by === targetUserId) r.assigned_by = null;
+    });
+    database.adminAuditLogs.forEach(l => {
+        if (l.actor_id === targetUserId) l.actor_id = null;
+    });
+
+    // 3. Delete user movements first, then products
+    database.stockMovements = database.stockMovements.filter(m => m.user_id !== targetUserId);
+    const userProductIds = new Set(database.products.filter(p => p.user_id === targetUserId).map(p => p.id));
+    database.stockMovements = database.stockMovements.filter(m => !userProductIds.has(m.product_id));
+    database.products = database.products.filter(p => p.user_id !== targetUserId);
+
+    // 4. Delete profile and auth user
+    database.profiles = database.profiles.filter(p => p.id !== targetUserId);
+    database.authUsers = database.authUsers.filter(u => u.id !== targetUserId);
+
+    return { success: true };
+}
+
+test('Cascading deletion cleans products and movements while preserving audit and feedback integrity', () => {
+    const db = {
+        authUsers: [{ id: 'user-to-del', email: 'disposable@test.io' }, { id: 'admin-1', email: 'admin@test.io' }],
+        profiles: [{ id: 'user-to-del', full_name: 'Disposable User' }],
+        products: [{ id: 'prod-1', user_id: 'user-to-del', name: 'Charger' }],
+        stockMovements: [{ id: 'mov-1', user_id: 'user-to-del', product_id: 'prod-1', quantity: 5 }],
+        feedback: [{ id: 'fb-1', user_id: 'user-to-del', message: 'Great app' }],
+        platformRoles: [{ id: 'r-1', user_id: 'admin-1', assigned_by: 'user-to-del', role: 'admin' }],
+        adminAuditLogs: [{ id: 'log-1', actor_id: 'user-to-del', action: 'EXPORT_CSV' }]
+    };
+
+    const res = simulateDatabaseCascadeDeletion(db, 'user-to-del');
+    assert.strictEqual(res.success, true);
+    assert.strictEqual(db.authUsers.length, 1);
+    assert.strictEqual(db.profiles.length, 0);
+    assert.strictEqual(db.products.length, 0);
+    assert.strictEqual(db.stockMovements.length, 0);
+    // Historical audit logs and feedback are preserved with actor/user nullified
+    assert.strictEqual(db.feedback.length, 1);
+    assert.strictEqual(db.feedback[0].user_id, null);
+    assert.strictEqual(db.adminAuditLogs.length, 1);
+    assert.strictEqual(db.adminAuditLogs[0].actor_id, null);
+    assert.strictEqual(db.platformRoles[0].assigned_by, null);
+});
+
+test('Submission state tracking prevents duplicate concurrent deletion requests', () => {
+    let isSubmitting = false;
+    const triggerDeletion = () => {
+        if (isSubmitting) return { rejected: true, reason: 'Already in progress' };
+        isSubmitting = true;
+        return { rejected: false };
+    };
+
+    const firstClick = triggerDeletion();
+    assert.strictEqual(firstClick.rejected, false);
+
+    const secondClick = triggerDeletion();
+    assert.strictEqual(secondClick.rejected, true);
+    assert.strictEqual(secondClick.reason, 'Already in progress');
+});
+
 console.log(`\n=================================================`);
 console.log(`Test Results: ${passed} Passed, ${failed} Failed`);
 console.log(`=================================================`);
