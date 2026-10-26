@@ -336,7 +336,7 @@
 
         // Check for PKCE exchange code (?code=...)
         const pkceCode = urlParams.get('code');
-        if (pkceCode && (isVerifyPath || hasVerifyQuery)) {
+        if (pkceCode) {
             showAuthScreen('verifying');
             try {
                 const { data, error } = await supabase.auth.exchangeCodeForSession(pkceCode);
@@ -381,6 +381,15 @@
             } catch {}
             return;
         }
+
+        // Attach listener for async auth events (e.g. hash token resolution)
+        supabase.auth.onAuthStateChange(async (event, session) => {
+            if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+                if (isVerifyPath || hasVerifyHash || urlParams.get('type') === 'signup') {
+                    showAuthScreen('verify-success', session.user);
+                }
+            }
+        });
 
         const { data, error } = await supabase.auth.getSession();
 
@@ -919,7 +928,7 @@
                 btn.textContent = 'Sending link...';
 
                 const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                    redirectTo: window.location.origin + window.location.pathname
+                    redirectTo: getAuthRedirectUrl()
                 });
 
                 if (error) {
