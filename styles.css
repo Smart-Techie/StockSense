@@ -1874,7 +1874,7 @@ tr:hover td {
     }
 
     .metrics {
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 14px;
     }
 
@@ -1900,4 +1900,468 @@ tr:hover td {
     .grid {
         gap: 22px;
     }
+}
+
+/* --------------------------------------------------------------------------
+   Homepage Redesign: Green Adviser Banner Card
+   -------------------------------------------------------------------------- */
+.advisor-banner-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(26, 16, 42, 0.85) 60%, rgba(12, 10, 16, 0.95));
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35), inset 0 0 20px rgba(16, 185, 129, 0.05);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.advisor-banner-icon {
+    font-size: 28px;
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: rgba(16, 185, 129, 0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.advisor-banner-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.advisor-banner-tag {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    color: var(--green);
+    margin-bottom: 4px;
+}
+
+.advisor-banner-body h3 {
+    margin: 0 0 4px 0;
+    font-size: 17px;
+    color: var(--text);
+    font-weight: 700;
+}
+
+.advisor-banner-body p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.45;
+}
+
+.advisor-banner-card .btn {
+    flex-shrink: 0;
+    background: var(--green);
+    color: #0c0a10;
+    border: none;
+    font-weight: 600;
+}
+
+.advisor-banner-card .btn:hover {
+    background: #059669;
+}
+
+@media (max-width: 640px) {
+    .advisor-banner-card {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 14px;
+        padding: 16px;
+    }
+    .advisor-banner-card .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Homepage Redesign: Compact Stock Alert Summary
+   -------------------------------------------------------------------------- */
+.stock-alert-summary {
+    margin-bottom: 20px;
+    padding: 14px 18px;
+}
+
+.alert-summary-healthy,
+.alert-summary-warning {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+}
+
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.status-dot.healthy {
+    background: var(--green);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+}
+
+.status-dot.warning {
+    background: var(--orange);
+    box-shadow: 0 0 10px rgba(255, 159, 67, 0.6);
+}
+
+.alert-summary-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.alert-summary-text b {
+    display: block;
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 2px;
+}
+
+.alert-summary-text p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+    .alert-summary-warning {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    .alert-summary-warning .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Homepage Redesign: Getting Started Guide
+   -------------------------------------------------------------------------- */
+.getting-started-panel {
+    margin-bottom: 20px;
+}
+
+.getting-started-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+}
+
+.getting-started-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.getting-started-step:hover,
+.getting-started-step:focus-visible {
+    background: rgba(168, 85, 247, 0.08);
+    border-color: rgba(168, 85, 247, 0.35);
+    transform: translateY(-1px);
+    outline: none;
+}
+
+.step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(168, 85, 247, 0.2);
+    color: var(--lav);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+    border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.step-content b {
+    display: block;
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+
+.step-content p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.45;
+}
+
+@media (max-width: 768px) {
+    .getting-started-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Homepage Redesign: Version 2.0 Roadmap Preview
+   -------------------------------------------------------------------------- */
+.v2-preview-panel {
+    margin-bottom: 20px;
+}
+
+.v2-features-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+}
+
+.v2-feature-card {
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.v2-feature-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.v2-feature-head b {
+    font-size: 13px;
+    color: var(--text);
+}
+
+.tag-planned {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: rgba(168, 85, 247, 0.15);
+    color: var(--lav);
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.v2-feature-card p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+    .v2-features-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Homepage Redesign: Dashboard Footer Bar & Feedback Link
+   -------------------------------------------------------------------------- */
+.dashboard-footer-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 20px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.dashboard-footer-bar span {
+    font-size: 13px;
+    color: var(--muted);
+}
+
+@media (max-width: 640px) {
+    .dashboard-footer-bar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    .dashboard-footer-bar .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   PWA Floating Installation Reminder
+   -------------------------------------------------------------------------- */
+.pwa-install-banner {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    max-width: 380px;
+    background: rgba(22, 16, 34, 0.96);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    border-radius: 16px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 900;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 0 24px rgba(168, 85, 247, 0.2);
+    animation: pwaSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pwaSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.pwa-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.pwa-banner-icon {
+    font-size: 24px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(168, 85, 247, 0.15);
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.pwa-banner-text b {
+    display: block;
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 2px;
+}
+
+.pwa-banner-text span {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.3;
+}
+
+.pwa-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.btn-sm {
+    padding: 7px 12px !important;
+    font-size: 12px !important;
+}
+
+.btn-pwa-close {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.btn-pwa-close:hover {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 480px) {
+    .pwa-install-banner {
+        bottom: 16px;
+        left: 12px;
+        right: 12px;
+        max-width: none;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   PWA iOS Installation Instructions Modal
+   -------------------------------------------------------------------------- */
+.pwa-instructions-modal {
+    max-width: 440px !important;
+}
+
+.pwa-steps-list {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.pwa-steps-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 13px;
+    color: #ded6e8;
+    line-height: 1.45;
+}
+
+.step-badge {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--green);
+    font-weight: 700;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.ios-icon {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    font-size: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
 }

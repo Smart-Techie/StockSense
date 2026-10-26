@@ -316,7 +316,8 @@ function getGreeting(firstName, date = new Date()) {
         timeOfDay = 'Good afternoon';
     }
     const cleanName = (firstName || '').trim();
-    return cleanName ? `${timeOfDay}, ${cleanName} 👋` : `${timeOfDay} 👋`;
+    const displayName = cleanName || 'there';
+    return `${timeOfDay}, ${displayName} 👋`;
 }
 
 function getUserFirstName(profile, user) {
@@ -352,11 +353,12 @@ test('Greeting: 5:00 PM to 4:59 AM produces "Good evening"', () => {
     assert.strictEqual(getGreeting('John', earlyMorning459), 'Good evening, John 👋');
 });
 
-test('Greeting: missing profile name falls back gracefully without empty name', () => {
+test('Greeting: missing profile name falls back gracefully to "there"', () => {
     const morning = new Date(2026, 9, 26, 9, 0, 0);
-    assert.strictEqual(getGreeting('', morning), 'Good morning 👋');
-    assert.strictEqual(getGreeting(null, morning), 'Good morning 👋');
-    assert.strictEqual(getGreeting('   ', morning), 'Good morning 👋');
+    const afternoon = new Date(2026, 9, 26, 14, 0, 0);
+    assert.strictEqual(getGreeting('', morning), 'Good morning, there 👋');
+    assert.strictEqual(getGreeting(null, morning), 'Good morning, there 👋');
+    assert.strictEqual(getGreeting('   ', afternoon), 'Good afternoon, there 👋');
 });
 
 test('First name extractor gets first name from full name or falls back gracefully', () => {
@@ -423,6 +425,125 @@ test('Administrative authorization permits only owner and admin roles', () => {
     assert.strictEqual(isAdminOrOwner(null), false);
     assert.strictEqual(isAdminOrOwner(undefined), false);
     assert.strictEqual(isAdminOrOwner(''), false);
+});
+
+// -----------------------------------------------------------------------------
+// 11. Four Key Homepage Statistics Calculations
+// -----------------------------------------------------------------------------
+function calculateHomepageMetrics(products) {
+    const totalProducts = products.length;
+    const unitsInStock = products.reduce((acc, p) => acc + Number(p.quantity || 0), 0);
+    // Low-stock items exclude out-of-stock items (quantity > 0 && quantity <= minimum_stock)
+    const lowStockItems = products.filter(p => Number(p.quantity) > 0 && Number(p.quantity) <= Number(p.minimum_stock)).length;
+    // Inventory cost value
+    const inventoryValue = products.reduce((acc, p) => acc + (Number(p.quantity || 0) * Number(p.unit_cost || 0)), 0);
+    return { totalProducts, unitsInStock, lowStockItems, inventoryValue };
+}
+
+test('Homepage metrics calculate total products, units in stock, low-stock, and cost value', () => {
+    const sampleProducts = [
+        { id: '1', quantity: 10, minimum_stock: 5, unit_cost: 1000 }, // in stock
+        { id: '2', quantity: 3, minimum_stock: 5, unit_cost: 2000 },  // low stock
+        { id: '3', quantity: 0, minimum_stock: 5, unit_cost: 3000 },  // out of stock (excluded from low-stock count)
+        { id: '4', quantity: 20, minimum_stock: 10, unit_cost: 500 }  // in stock
+    ];
+    const metrics = calculateHomepageMetrics(sampleProducts);
+    assert.strictEqual(metrics.totalProducts, 4);
+    assert.strictEqual(metrics.unitsInStock, 33); // 10 + 3 + 0 + 20
+    assert.strictEqual(metrics.lowStockItems, 1); // only item 2
+    assert.strictEqual(metrics.inventoryValue, (10 * 1000) + (3 * 2000) + (0 * 3000) + (20 * 500)); // 26,000
+});
+
+// -----------------------------------------------------------------------------
+// 12. PWA State Machine & 5-Minute Repeat Timing
+// -----------------------------------------------------------------------------
+const PWA_INTERVAL_MS = 5 * 60 * 1000;
+
+function shouldShowPwaPrompt(isInstalled, lastDismissedTimestamp, currentTimestamp = Date.now()) {
+    if (isInstalled) return false;
+    if (!lastDismissedTimestamp || lastDismissedTimestamp <= 0) return true;
+    return (currentTimestamp - lastDismissedTimestamp) >= PWA_INTERVAL_MS;
+}
+
+test('PWA prompt logic never displays when app is installed', () => {
+    const now = Date.now();
+    assert.strictEqual(shouldShowPwaPrompt(true, null, now), false);
+    assert.strictEqual(shouldShowPwaPrompt(true, now - 1000000, now), false);
+});
+
+test('PWA prompt shows on initial visit when uninstalled and never dismissed', () => {
+    const now = Date.now();
+    assert.strictEqual(shouldShowPwaPrompt(false, null, now), true);
+    assert.strictEqual(shouldShowPwaPrompt(false, 0, now), true);
+});
+
+test('PWA prompt is suppressed during the 5-minute dismissal window', () => {
+    const now = Date.now();
+    const fourMinutesAgo = now - (4 * 60 * 1000);
+    const fourMins59SecsAgo = now - (4 * 60 * 1000 + 59 * 1000);
+    assert.strictEqual(shouldShowPwaPrompt(false, now, now), false);
+    assert.strictEqual(shouldShowPwaPrompt(false, fourMinutesAgo, now), false);
+    assert.strictEqual(shouldShowPwaPrompt(false, fourMins59SecsAgo, now), false);
+});
+
+test('PWA prompt re-triggers after 5 minutes have elapsed since dismissal', () => {
+    const now = Date.now();
+    const exactly5MinutesAgo = now - (5 * 60 * 1000);
+    const sixMinutesAgo = now - (6 * 60 * 1000);
+    assert.strictEqual(shouldShowPwaPrompt(false, exactly5MinutesAgo, now), true);
+    assert.strictEqual(shouldShowPwaPrompt(false, sixMinutesAgo, now), true);
+});
+
+// -----------------------------------------------------------------------------
+// 13. Customer Feedback Validation
+// -----------------------------------------------------------------------------
+function validateFeedbackInput(feedbackType, message, email) {
+    const validTypes = ['Suggestion', 'Bug Report', 'General Feedback'];
+    if (!validTypes.includes(feedbackType)) {
+        return { valid: false, error: 'Invalid feedback category.' };
+    }
+    const cleanMessage = (message || '').trim();
+    if (cleanMessage.length < 5) {
+        return { valid: false, error: 'Feedback message must be at least 5 characters long.' };
+    }
+    if (cleanMessage.length > 2000) {
+        return { valid: false, error: 'Feedback message cannot exceed 2000 characters.' };
+    }
+    if (email && email.trim()) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email.trim())) {
+            return { valid: false, error: 'Please enter a valid email address or leave blank.' };
+        }
+    }
+    return { valid: true, error: null };
+}
+
+test('Feedback validation accepts valid suggestions, bug reports, and general feedback', () => {
+    const res = validateFeedbackInput('Suggestion', 'Please add multi-currency exchange rate calculation.', 'owner@store.com');
+    assert.strictEqual(res.valid, true);
+    assert.strictEqual(res.error, null);
+});
+
+test('Feedback validation accepts empty optional email', () => {
+    const res = validateFeedbackInput('General Feedback', 'The mobile layout feels so much smoother now!', '');
+    assert.strictEqual(res.valid, true);
+});
+
+test('Feedback validation rejects short or empty messages', () => {
+    assert.strictEqual(validateFeedbackInput('Bug Report', '', '').valid, false);
+    assert.strictEqual(validateFeedbackInput('Bug Report', '   ', '').valid, false);
+    assert.strictEqual(validateFeedbackInput('Bug Report', 'Hi', '').valid, false);
+});
+
+test('Feedback validation rejects messages exceeding 2000 characters', () => {
+    const longMessage = 'A'.repeat(2001);
+    const res = validateFeedbackInput('Suggestion', longMessage, '');
+    assert.strictEqual(res.valid, false);
+});
+
+test('Feedback validation rejects invalid email format when provided', () => {
+    const res = validateFeedbackInput('Suggestion', 'I have a great restock feature request', 'invalid-email');
+    assert.strictEqual(res.valid, false);
 });
 
 console.log(`\n=================================================`);

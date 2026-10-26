@@ -1082,16 +1082,58 @@
         const p = state.products;
         const totalUnits = p.reduce((s, x) => s + Number(x.quantity || 0), 0);
         const lowCount = p.filter(x => st(x) === 'low').length;
-        const outCount = p.filter(x => st(x) === 'out').length;
         const totalVal = p.reduce((s, x) => s + (Number(x.quantity || 0) * Number(x.unit_cost || 0)), 0);
 
-        const html = card('Total products', fmt(p.length), '▦', '', 'Unique listed products') +
-            card('Units in stock', fmt(totalUnits), '▤', 'g', 'Across catalogue') +
-            card('Low-stock items', fmt(lowCount), '!', 'o', lowCount === 1 ? '1 needs attention' : `${lowCount} need attention`) +
-            card('Inventory value', cash(totalVal), '₦', 'p', 'At recorded purchase cost') +
-            (containerId === 'metrics' ? card('Out of stock', fmt(outCount), '×', 'r', `${outCount} currently unavailable`) : '');
+        const html = card('Total Products', fmt(p.length), '📦', '', 'Active catalog products') +
+            card('Units in Stock', fmt(totalUnits), '▤', 'g', 'Available inventory units') +
+            card('Low-Stock Items', fmt(lowCount), '!', 'o', lowCount === 1 ? '1 item needs attention' : `${lowCount} items need attention`) +
+            card('Inventory Value', cash(totalVal), '₦', 'p', 'At recorded purchase cost');
 
-        $(containerId).innerHTML = html;
+        const el = $(containerId);
+        if (el) el.innerHTML = html;
+    }
+
+    function renderStockAlertSummary() {
+        const el = $('stock-alert-summary');
+        if (!el) return;
+
+        const p = state.products;
+        const lowProducts = p.filter(x => st(x) === 'low');
+        const outProducts = p.filter(x => st(x) === 'out');
+        const totalAlerts = lowProducts.length + outProducts.length;
+
+        if (totalAlerts === 0) {
+            el.innerHTML = `
+                <div class="alert-summary-healthy">
+                    <span class="status-dot healthy"></span>
+                    <div class="alert-summary-text">
+                        <b>Stock Health: All Clear</b>
+                        <p>Your stock is looking good. No stock alerts right now.</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            const parts = [];
+            if (outProducts.length > 0) {
+                parts.push(`<b style="color:var(--red)">${outProducts.length} ${outProducts.length === 1 ? 'product' : 'products'} out of stock</b>`);
+            }
+            if (lowProducts.length > 0) {
+                parts.push(`<b style="color:var(--orange)">${lowProducts.length} ${lowProducts.length === 1 ? 'product' : 'products'} low on stock</b>`);
+            }
+
+            el.innerHTML = `
+                <div class="alert-summary-warning">
+                    <span class="status-dot warning"></span>
+                    <div class="alert-summary-text">
+                        <b>Stock Attention Required</b>
+                        <p>${parts.join(' and ')} across your catalog.</p>
+                    </div>
+                    <button class="btn secondary" data-go="inventory" type="button">
+                        Review in Product Inventory →
+                    </button>
+                </div>
+            `;
+        }
     }
 
     function renderChart() {
@@ -1412,9 +1454,7 @@
 
     function render() {
         renderMetrics('metrics');
-        renderChart();
-        renderAlerts();
-        renderRecent();
+        renderStockAlertSummary();
         renderProducts();
         renderMoves();
         reports();
@@ -2235,7 +2275,8 @@
             timeOfDay = 'Good afternoon';
         }
         const cleanName = (firstName || '').trim();
-        return cleanName ? `${timeOfDay}, ${cleanName} 👋` : `${timeOfDay} 👋`;
+        const displayName = cleanName || 'there';
+        return `${timeOfDay}, ${displayName} 👋`;
     }
 
     function getUserFirstName() {
@@ -2318,6 +2359,300 @@
         if (pageId === 'movements') renderMoves();
     }
 
+    // -------------------------------------------------------------------------
+    // Customer Feedback System
+    // -------------------------------------------------------------------------
+    function openFeedbackModal() {
+        const userEmail = state.currentUser ? (state.currentUser.email || '') : '';
+
+        $('modal').innerHTML = `
+            <div class="modalbg" id="modal-bg">
+                <form class="modal" id="form-feedback" style="max-width:480px">
+                    <h2>Share Feedback</h2>
+                    <p style="margin-bottom:16px">Help us shape StockSense. Tell us about your experience, report an issue, or suggest a new feature.</p>
+                    
+                    <div class="fg full" style="margin-bottom:14px">
+                        <label for="fb-type">Feedback Category *</label>
+                        <select class="field" id="fb-type" required>
+                            <option value="Suggestion">💡 Feature Suggestion</option>
+                            <option value="Bug Report">🐛 Issue / Bug Report</option>
+                            <option value="General Feedback" selected>💬 General Feedback</option>
+                        </select>
+                    </div>
+
+                    <div class="fg full" style="margin-bottom:14px">
+                        <label for="fb-message">Your Feedback *</label>
+                        <textarea class="field" id="fb-message" rows="4" placeholder="Tell us what you like, what is confusing, or what you would like improved..." required style="resize:vertical;min-height:90px"></textarea>
+                        <div style="display:flex;justify-content:space-between;margin-top:4px">
+                            <small class="muted">Minimum 5 characters</small>
+                            <small class="muted" id="fb-char-count">0 / 2000</small>
+                        </div>
+                    </div>
+
+                    <div class="fg full" style="margin-bottom:18px">
+                        <label for="fb-email">Contact Email (Optional)</label>
+                        <input class="field" type="email" id="fb-email" value="${esc(userEmail)}" placeholder="you@company.com">
+                        <small class="muted">Only used if we need to follow up regarding your report.</small>
+                    </div>
+
+                    <div class="actions">
+                        <button type="button" class="btn secondary" id="modal-cancel">Cancel</button>
+                        <button type="submit" class="btn primary" id="btn-submit-feedback">Submit Feedback</button>
+                    </div>
+                </form>
+            </div>
+        `;
+
+        $('modal-cancel').onclick = closeModal;
+        $('modal-bg').onclick = e => { if (e.target.id === 'modal-bg') closeModal(); };
+
+        const msgInput = $('fb-message');
+        const charCount = $('fb-char-count');
+        if (msgInput && charCount) {
+            msgInput.oninput = () => {
+                charCount.textContent = `${msgInput.value.length} / 2000`;
+            };
+        }
+
+        $('form-feedback').onsubmit = async e => {
+            e.preventDefault();
+            const type = $('fb-type').value;
+            const message = msgInput.value.trim();
+            const email = $('fb-email').value.trim();
+            const btn = $('btn-submit-feedback');
+
+            if (message.length < 5) {
+                notify('Please provide a message with at least 5 characters.', 'error');
+                return;
+            }
+            if (message.length > 2000) {
+                notify('Message exceeds maximum limit of 2000 characters.', 'error');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Submitting...';
+
+            try {
+                const { error } = await supabase.from('feedback').insert({
+                    user_id: state.currentUser ? state.currentUser.id : null,
+                    feedback_type: type,
+                    message: message,
+                    contact_email: email || (state.currentUser ? state.currentUser.email : null)
+                });
+
+                if (error) {
+                    throw error;
+                }
+
+                closeModal();
+                notify('Thank you for helping us improve StockSense!', 'success');
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = 'Submit Feedback';
+                notify('Failed to save feedback: ' + (err.message || 'Please check your connection and try again.'), 'error');
+            }
+        };
+    }
+
+    async function loadAdminFeedback() {
+        const statusFilter = $('admin-fb-filter-status')?.value || 'all';
+        const tbody = $('admin-feedback-table');
+        if (!tbody) return;
+
+        try {
+            let query = supabase
+                .from('feedback')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (statusFilter !== 'all') {
+                query = query.eq('status', statusFilter);
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+                tbody.innerHTML = `<tr><td colspan="6" class="empty">Could not load feedback: ${esc(error.message)}</td></tr>`;
+                return;
+            }
+
+            if (!data || !data.length) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty">No feedback entries recorded.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.map(fb => {
+                const statusCls = fb.status === 'Resolved' ? 'badge-active' : (fb.status === 'Reviewed' ? 'role-badge moderator' : 'badge-suspended');
+                return `
+                    <tr>
+                        <td>${datefmt(fb.created_at)}</td>
+                        <td><b>${esc(fb.feedback_type)}</b></td>
+                        <td>${esc(fb.contact_email || 'Anonymous')}</td>
+                        <td style="max-width:320px;white-space:normal;line-height:1.4">${esc(fb.message)}</td>
+                        <td><span class="badge ${statusCls}">${esc(fb.status)}</span></td>
+                        <td>
+                            <select class="field" data-admin-act="fb-status" data-fbid="${fb.id}" style="padding:4px 8px;font-size:11px;width:auto">
+                                <option value="New" ${fb.status === 'New' ? 'selected' : ''}>New</option>
+                                <option value="Reviewed" ${fb.status === 'Reviewed' ? 'selected' : ''}>Reviewed</option>
+                                <option value="Resolved" ${fb.status === 'Resolved' ? 'selected' : ''}>Resolved</option>
+                            </select>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="6" class="empty">Error: ${esc(err.message)}</td></tr>`;
+        }
+    }
+
+    async function updateFeedbackStatus(id, newStatus) {
+        try {
+            const { error } = await supabase
+                .from('feedback')
+                .update({ status: newStatus })
+                .eq('id', id);
+
+            if (error) throw error;
+            notify('Feedback status updated to ' + newStatus, 'success');
+            loadAdminFeedback();
+        } catch (err) {
+            notify('Failed to update status: ' + err.message, 'error');
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Progressive Web App (PWA) State Machine & 5-Minute Reminder
+    // -------------------------------------------------------------------------
+    const PWA_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+    let deferredPwaPrompt = null;
+    let pwaReminderTimer = null;
+
+    function isAppInstalled() {
+        if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+        if (window.navigator && window.navigator.standalone === true) return true;
+        if (document.referrer && document.referrer.startsWith('android-app://')) return true;
+        if (localStorage.getItem('stocksense_pwa_installed') === 'true') return true;
+        return false;
+    }
+
+    function shouldShowPwaPrompt() {
+        if (isAppInstalled()) return false;
+        const dismissedAt = Number(localStorage.getItem('stocksense_pwa_dismissed_at') || 0);
+        if (!dismissedAt) return true;
+        return (Date.now() - dismissedAt) >= PWA_INTERVAL_MS;
+    }
+
+    function scheduleNextPwaPrompt() {
+        if (isAppInstalled()) return;
+        if (pwaReminderTimer) clearTimeout(pwaReminderTimer);
+
+        const dismissedAt = Number(localStorage.getItem('stocksense_pwa_dismissed_at') || 0);
+        const elapsed = Date.now() - dismissedAt;
+        const remaining = Math.max(0, PWA_INTERVAL_MS - elapsed);
+
+        pwaReminderTimer = setTimeout(() => {
+            showPwaPromptIfEligible();
+        }, remaining);
+    }
+
+    function showPwaPromptIfEligible() {
+        if (isAppInstalled()) return;
+        if (!shouldShowPwaPrompt()) {
+            scheduleNextPwaPrompt();
+            return;
+        }
+
+        // Defer prompt if active modal dialog is open
+        const modalEl = $('modal');
+        if (modalEl && modalEl.children.length > 0) {
+            if (pwaReminderTimer) clearTimeout(pwaReminderTimer);
+            pwaReminderTimer = setTimeout(showPwaPromptIfEligible, 25000);
+            return;
+        }
+
+        const banner = $('pwa-install-banner');
+        if (banner) {
+            banner.style.display = 'flex';
+        }
+    }
+
+    function dismissPwaPrompt() {
+        localStorage.setItem('stocksense_pwa_dismissed_at', Date.now().toString());
+        const banner = $('pwa-install-banner');
+        if (banner) banner.style.display = 'none';
+        const iosModal = $('modal-pwa-instructions');
+        if (iosModal) iosModal.style.display = 'none';
+        scheduleNextPwaPrompt();
+    }
+
+    function markPwaInstalled() {
+        localStorage.setItem('stocksense_pwa_installed', 'true');
+        const banner = $('pwa-install-banner');
+        if (banner) banner.style.display = 'none';
+        const iosModal = $('modal-pwa-instructions');
+        if (iosModal) iosModal.style.display = 'none';
+        if (pwaReminderTimer) {
+            clearTimeout(pwaReminderTimer);
+            pwaReminderTimer = null;
+        }
+    }
+
+    async function handlePwaInstallClick() {
+        if (deferredPwaPrompt) {
+            deferredPwaPrompt.prompt();
+            const { outcome } = await deferredPwaPrompt.userChoice;
+            if (outcome === 'accepted') {
+                markPwaInstalled();
+            } else {
+                dismissPwaPrompt();
+            }
+            deferredPwaPrompt = null;
+        } else {
+            const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+            if (isIOS) {
+                const banner = $('pwa-install-banner');
+                if (banner) banner.style.display = 'none';
+                $('modal-pwa-instructions').style.display = 'flex';
+            } else {
+                notify('To install StockSense, click the install icon in your browser address bar or choose "Install" from the menu (⋮).', 'info');
+                dismissPwaPrompt();
+            }
+        }
+    }
+
+    function initPwa() {
+        // Register Service Worker for offline resilience
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(err => {
+                console.warn('[PWA] Service worker registration error:', err);
+            });
+        }
+
+        if (isAppInstalled()) {
+            markPwaInstalled();
+            return;
+        }
+
+        // Capture native browser installation prompt
+        window.addEventListener('beforeinstallprompt', e => {
+            e.preventDefault();
+            deferredPwaPrompt = e;
+            showPwaPromptIfEligible();
+        });
+
+        window.addEventListener('appinstalled', () => {
+            markPwaInstalled();
+        });
+
+        // Evaluate on load or schedule reminder
+        if (shouldShowPwaPrompt()) {
+            setTimeout(showPwaPromptIfEligible, 2500);
+        } else {
+            scheduleNextPwaPrompt();
+        }
+    }
+
     function switchAdminTab(tabId) {
         state.adminTab = tabId;
         document.querySelectorAll('.admin-nav-tab').forEach(b => {
@@ -2329,6 +2664,7 @@
 
         if (tabId === 'users') loadAdminUsers();
         if (tabId === 'settings') loadPlatformSettings();
+        if (tabId === 'feedback') loadAdminFeedback();
     }
 
     // -------------------------------------------------------------------------
@@ -2345,6 +2681,39 @@
         const goBtn = e.target.closest('[data-go]');
         if (goBtn) {
             go(goBtn.dataset.go);
+            return;
+        }
+
+        // Feedback triggers
+        const fbBtn = e.target.closest('#btn-open-feedback');
+        if (fbBtn) {
+            openFeedbackModal();
+            return;
+        }
+
+        const refreshFbBtn = e.target.closest('#btn-refresh-feedback');
+        if (refreshFbBtn) {
+            loadAdminFeedback();
+            return;
+        }
+
+        // PWA banner actions
+        const pwaInstallBtn = e.target.closest('#btn-pwa-install');
+        if (pwaInstallBtn) {
+            handlePwaInstallClick();
+            return;
+        }
+
+        const pwaDismissBtn = e.target.closest('#btn-pwa-dismiss');
+        if (pwaDismissBtn) {
+            dismissPwaPrompt();
+            return;
+        }
+
+        const pwaIosCloseBtn = e.target.closest('#btn-pwa-instructions-close');
+        if (pwaIosCloseBtn) {
+            $('modal-pwa-instructions').style.display = 'none';
+            dismissPwaPrompt();
             return;
         }
 
@@ -2384,6 +2753,17 @@
             if (act === 'assign-role') openAssignRoleModal(uid, adminActBtn.dataset.role);
             return;
         }
+    });
+
+    // Feedback status select change delegation
+    document.addEventListener('change', e => {
+        const sel = e.target.closest('[data-admin-act="fb-status"]');
+        if (sel) {
+            updateFeedbackStatus(sel.dataset.fbid, sel.value);
+        }
+    });
+    $('admin-fb-filter-status')?.addEventListener('change', () => {
+        loadAdminFeedback();
     });
 
     // Top action buttons
@@ -2575,9 +2955,21 @@
             updateDashboardGreeting,
             isAdminOrOwner,
             pageHeaders,
-            go
+            go,
+            isAppInstalled,
+            shouldShowPwaPrompt,
+            PWA_INTERVAL_MS,
+            scheduleNextPwaPrompt,
+            showPwaPromptIfEligible,
+            dismissPwaPrompt,
+            markPwaInstalled,
+            openFeedbackModal,
+            loadAdminFeedback
         };
     }
+
+    // Initialize Progressive Web App reminders and service worker
+    initPwa();
 
     // Start application session restoration
     initSession();

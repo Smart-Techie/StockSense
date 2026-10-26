@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2a1647"/>
+      <stop offset="100%" stop-color="#0c0a10"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="sGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d8b4fe"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#a855f7" stroke-opacity="0.3" stroke-width="4"/>
+  <!-- Stylized S shape -->
+  <path d="M336 176 C336 140 304 116 256 116 C204 116 176 142 176 176 C176 224 336 218 336 300 C336 352 296 396 256 396 C200 396 168 356 168 316" fill="none" stroke="url(#sGrad)" stroke-width="46" stroke-linecap="round"/>
+  <!-- Accent indicator dots -->
+  <circle cx="348" cy="348" r="24" fill="url(#glow)"/>
+</svg>

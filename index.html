@@ -6,6 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
     <title>StockSense — Know Your Stock. Grow Your Business.</title>
     <meta name="description" content="StockSense is an intelligent inventory management platform for small businesses. Track stock, record sales, automate SKUs, and make smarter restocking decisions.">
+    <meta name="theme-color" content="#0c0a10">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="StockSense">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="stylesheet" href="styles.css">
 </head>
 
@@ -111,52 +118,119 @@
                 </div>
             </header>
 
-            <!-- Page 1: Dashboard Overview -->
+            <!-- Page 1: Dashboard Overview (Redesigned) -->
             <section class="page active" id="page-dashboard">
+                <!-- Tasteful, Compact Welcome Card -->
                 <div class="welcome">
                     <div>
                         <div class="eyebrow">Welcome to StockSense</div>
                         <h2>Let's make every product count.</h2>
-                        <p>Catch shortages early, track every sale and restock, and allocate your inventory budget with confidence.</p>
                     </div>
                     <div class="spark">✧</div>
                 </div>
 
+                <!-- Four Key Statistic Cards -->
                 <div class="metrics" id="metrics"></div>
 
-                <div class="grid">
-                    <div class="panel">
-                        <div class="panel-head">
-                            <div>
-                                <h3>Stock activity</h3>
-                                <p class="sub">Recorded sales and restocks over the last 7 days</p>
+                <!-- Green StockSense Adviser Card (immediately after 4 statistics) -->
+                <div class="advisor-banner-card">
+                    <div class="advisor-banner-icon">💡</div>
+                    <div class="advisor-banner-body">
+                        <div class="advisor-banner-tag">INVENTORY ASSISTANT</div>
+                        <h3>StockSense Adviser</h3>
+                        <p>Your inventory assistant helps you identify shortages, prioritize restocking, and make informed stock decisions.</p>
+                    </div>
+                    <button class="btn primary" id="btn-dashboard-adviser" data-go="advisor" type="button">
+                        Review Stock Recommendations →
+                    </button>
+                </div>
+
+                <!-- Compact Stock-Alert Summary -->
+                <div class="panel stock-alert-summary" id="stock-alert-summary">
+                    <!-- Populated dynamically by renderDashboardAlerts() -->
+                </div>
+
+                <!-- Getting Started with StockSense Guide -->
+                <div class="panel getting-started-panel">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Getting Started with StockSense</h3>
+                            <p class="sub">Essential steps to master your stock and keep inventory accurate</p>
+                        </div>
+                    </div>
+                    <div class="getting-started-grid">
+                        <div class="getting-started-step" data-go="inventory" role="button" tabindex="0" title="Go to Product Inventory">
+                            <div class="step-num">1</div>
+                            <div class="step-content">
+                                <b>Add Your Products →</b>
+                                <p>Build your inventory by adding products, SKUs, prices, and opening stock quantities.</p>
                             </div>
                         </div>
-                        <div class="chart" id="chart"></div>
-                        <div class="sub" style="margin:10px 0 0;font-size:10px">Purple = units sold · Green = units restocked</div>
-                    </div>
-                    <div class="panel">
-                        <h3>Needs attention</h3>
-                        <p class="sub">Products that have reached or dropped below minimum stock</p>
-                        <div class="list" id="alerts"></div>
+                        <div class="getting-started-step" data-go="movements" role="button" tabindex="0" title="Go to Stock Movements">
+                            <div class="step-num">2</div>
+                            <div class="step-content">
+                                <b>Record Stock Movements →</b>
+                                <p>Record sales, restocking, and adjustments to keep your inventory accurate.</p>
+                            </div>
+                        </div>
+                        <div class="getting-started-step" data-go="reports" role="button" tabindex="0" title="Go to Reports">
+                            <div class="step-num">3</div>
+                            <div class="step-content">
+                                <b>Understand Your Inventory →</b>
+                                <p>Use your dashboard, reports, and StockSense Adviser to identify what needs attention.</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="grid">
-                    <div class="panel">
-                        <h3>Recent stock movements</h3>
-                        <p class="sub">A traceable record of what changed</p>
-                        <div class="list" id="recent"></div>
+                <!-- StockSense Version 2.0 Roadmap Preview -->
+                <div class="panel v2-preview-panel">
+                    <div class="panel-head">
+                        <div>
+                            <div class="eyebrow" style="color:var(--lav)">COMING SOON</div>
+                            <h3>The Future of StockSense</h3>
+                            <p class="sub">Selected capabilities planned for Version 2.0</p>
+                        </div>
+                        <span class="badge" style="background:rgba(168,85,247,0.15);color:var(--lav);border:1px solid rgba(168,85,247,0.3)">Roadmap</span>
                     </div>
-                    <div class="panel">
-                        <h3>StockSense Adviser ✧</h3>
-                        <p class="sub">Prioritized decision support for your next restock</p>
-                        <div class="advisor">
-                            <b>Make your restocking budget work harder.</b>
-                            <p>Get data-backed restocking priorities, suggested quantities, and cost breakdowns.</p>
-                            <button class="btn primary" data-go="advisor" style="margin-top:8px">Get recommendations →</button>
+                    <div class="v2-features-grid">
+                        <div class="v2-feature-card">
+                            <div class="v2-feature-head">
+                                <b>📊 Advanced Reports & Insights</b>
+                                <span class="tag-planned">Planned</span>
+                            </div>
+                            <p>Profit margins, stock velocity metrics, and historical trend visualizations.</p>
+                        </div>
+                        <div class="v2-feature-card">
+                            <div class="v2-feature-head">
+                                <b>⚡ Enhanced Inventory Recommendations</b>
+                                <span class="tag-planned">Planned</span>
+                            </div>
+                            <p>Automated reorder point forecasting and proactive low-stock warnings.</p>
+                        </div>
+                        <div class="v2-feature-card">
+                            <div class="v2-feature-head">
+                                <b>🚚 Supplier Management & POs</b>
+                                <span class="tag-planned">Planned</span>
+                            </div>
+                            <p>Vendor contact directories, lead time tracking, and purchase order generation.</p>
+                        </div>
+                        <div class="v2-feature-card">
+                            <div class="v2-feature-head">
+                                <b>👥 Team Features & Collaboration</b>
+                                <span class="tag-planned">Planned</span>
+                            </div>
+                            <p>Multi-staff permissions, shift handovers, and branch inventory allocation.</p>
                         </div>
                     </div>
+                </div>
+
+                <!-- Unobtrusive Feedback Link/Bar -->
+                <div class="dashboard-footer-bar">
+                    <span>Have thoughts, feature suggestions or found an issue?</span>
+                    <button class="btn secondary" id="btn-open-feedback" type="button">
+                        💬 Share Feedback
+                    </button>
                 </div>
             </section>
 
@@ -339,6 +413,7 @@
                     <button class="admin-nav-tab" data-admin-tab="users">User Management</button>
                     <button class="admin-nav-tab" data-admin-tab="roles">Roles & Administrators</button>
                     <button class="admin-nav-tab" data-admin-tab="logs">Audit Logs</button>
+                    <button class="admin-nav-tab" data-admin-tab="feedback">💬 Feedback</button>
                     <button class="admin-nav-tab" data-admin-tab="settings">Platform Settings</button>
                 </div>
 
@@ -524,6 +599,45 @@
                         </form>
                     </div>
                 </div>
+
+                <!-- Admin Tab 6: Customer Feedback -->
+                <div class="admin-section" id="admin-sec-feedback">
+                    <div class="panel">
+                        <div class="panel-head">
+                            <div>
+                                <h3>User Feedback & Issue Reports</h3>
+                                <p class="sub">Direct user suggestions, bug reports, and feedback submissions</p>
+                            </div>
+                            <div class="panel-head-actions">
+                                <select class="field" id="admin-fb-filter-status" style="width:auto">
+                                    <option value="all">All statuses</option>
+                                    <option value="New">New</option>
+                                    <option value="Reviewed">Reviewed</option>
+                                    <option value="Resolved">Resolved</option>
+                                </select>
+                                <button class="btn secondary" id="btn-refresh-feedback" type="button">↻ Refresh</button>
+                            </div>
+                        </div>
+
+                        <div class="table-wrap">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Type</th>
+                                        <th>Sender / Email</th>
+                                        <th>Message</th>
+                                        <th>Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="admin-feedback-table">
+                                    <tr><td colspan="6" class="empty">Loading feedback submissions...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <p class="footnote">
@@ -531,6 +645,50 @@
                 <span style="color:var(--lav)">◆</span> Version 1.0 Production Release
             </p>
         </main>
+    </div>
+
+    <!-- PWA Floating Installation Reminder -->
+    <div id="pwa-install-banner" class="pwa-install-banner" style="display:none" role="region" aria-label="Install StockSense Application">
+        <div class="pwa-banner-content">
+            <div class="pwa-banner-icon">📲</div>
+            <div class="pwa-banner-text">
+                <b>Install StockSense</b>
+                <span>Access your inventory faster, even offline.</span>
+            </div>
+        </div>
+        <div class="pwa-banner-actions">
+            <button class="btn primary btn-sm" id="btn-pwa-install" type="button" aria-label="Install StockSense on this device">
+                Install StockSense
+            </button>
+            <button class="btn-pwa-close" id="btn-pwa-dismiss" type="button" aria-label="Dismiss installation prompt for now" title="Remind me in 5 minutes">
+                ✕
+            </button>
+        </div>
+    </div>
+
+    <!-- PWA iOS / Safari Manual Installation Modal -->
+    <div id="modal-pwa-instructions" class="modalbg" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title">
+        <div class="modal pwa-instructions-modal">
+            <h2 id="pwa-modal-title">Install StockSense on iOS</h2>
+            <p>To install StockSense on your iPhone or iPad for the best full-screen experience:</p>
+            <ol class="pwa-steps-list">
+                <li>
+                    <span class="step-badge">1</span>
+                    <div>Tap the <b>Share</b> button <span class="ios-icon">⎋</span> at the bottom of Safari.</div>
+                </li>
+                <li>
+                    <span class="step-badge">2</span>
+                    <div>Scroll down and select <b>Add to Home Screen</b> <span class="ios-icon">＋</span>.</div>
+                </li>
+                <li>
+                    <span class="step-badge">3</span>
+                    <div>Tap <b>Add</b> in the top right corner. StockSense will appear on your Home Screen.</div>
+                </li>
+            </ol>
+            <div class="actions" style="margin-top:20px">
+                <button type="button" class="btn primary full" id="btn-pwa-instructions-close">Got it</button>
+            </div>
+        </div>
     </div>
 
     <!-- Dynamic Modal Dialog Target -->
