@@ -2715,8 +2715,8 @@
                 if (error) throw error;
 
                 // 3. Only a server-verified deletion counts as success.
-                if (!data || data.success !== true || data.deleted_user_id !== userId) {
-                    throw new Error('The server did not confirm the deletion.');
+                if (!data || data.success !== true || data.deleted_user_id !== userId || (data.auth_user_deleted !== undefined && data.auth_user_deleted !== true)) {
+                    throw new Error('The server did not confirm the deletion of the authentication account.');
                 }
 
                 closeModal();

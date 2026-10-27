@@ -1,5 +1,7 @@
 // StockSense Version 1.0 — Automated Logic and Unit Test Suite
 import assert from 'assert';
+import fs from 'fs';
+import path from 'path';
 
 console.log("=================================================");
 console.log("Running StockSense Version 1.0 Unit Test Suite");
@@ -1039,6 +1041,80 @@ test('Submission state tracking prevents duplicate concurrent deletion requests'
     const secondClick = triggerDeletion();
     assert.strictEqual(secondClick.rejected, true);
     assert.strictEqual(secondClick.reason, 'Already in progress');
+});
+
+// -----------------------------------------------------------------------------
+// 15. Verified Auth Deletion Contract & Response Validation
+// -----------------------------------------------------------------------------
+function validateAdminDeleteResponse(rpcData, targetUserId) {
+    if (!rpcData || typeof rpcData !== 'object') {
+        throw new Error('Server returned an empty or invalid response.');
+    }
+    if (rpcData.success !== true) {
+        throw new Error('Server indicated deletion was unsuccessful.');
+    }
+    if (rpcData.deleted_user_id !== targetUserId) {
+        throw new Error('Server confirmed deletion for a different user ID.');
+    }
+    if (rpcData.auth_user_deleted !== undefined && rpcData.auth_user_deleted !== true) {
+        throw new Error('Supabase Auth user was not confirmed deleted.');
+    }
+    return true;
+}
+
+test('validateAdminDeleteResponse accepts verified response with auth_user_deleted', () => {
+    const valid = { success: true, auth_user_deleted: true, deleted_user_id: 'u-123' };
+    assert.strictEqual(validateAdminDeleteResponse(valid, 'u-123'), true);
+});
+
+test('validateAdminDeleteResponse rejects response when auth_user_deleted is false', () => {
+    const invalid = { success: true, auth_user_deleted: false, deleted_user_id: 'u-123' };
+    assert.throws(() => validateAdminDeleteResponse(invalid, 'u-123'), /Supabase Auth user was not confirmed deleted/);
+});
+
+test('validateAdminDeleteResponse rejects mismatched target user ID', () => {
+    const mismatched = { success: true, auth_user_deleted: true, deleted_user_id: 'u-999' };
+    assert.throws(() => validateAdminDeleteResponse(mismatched, 'u-123'), /Server confirmed deletion for a different user ID/);
+});
+
+// -----------------------------------------------------------------------------
+// 16. Authentication Email Template Integrity & Branding Compliance
+// -----------------------------------------------------------------------------
+test('Verify email template preserves Supabase ConfirmationURL variable and branding', () => {
+    const templatePath = path.resolve('email-templates', 'verify-email.html');
+    assert.ok(fs.existsSync(templatePath), 'verify-email.html must exist');
+    const content = fs.readFileSync(templatePath, 'utf8');
+
+    // Branding checks
+    assert.ok(content.includes('StockSense'), 'Must include brand name StockSense');
+    assert.ok(content.includes('Know Your Stock. Grow Your Business.'), 'Must include brand tagline');
+    assert.ok(content.includes('Verify My Email'), 'CTA button must be labeled "Verify My Email"');
+    assert.ok(content.includes('Verify your email address | StockSense'), 'Title/Subject must match specification');
+
+    // Required Supabase GoTrue variables
+    assert.ok(content.includes('{{ .ConfirmationURL }}'), 'Must preserve {{ .ConfirmationURL }} variable');
+});
+
+test('Reset password template preserves Supabase ConfirmationURL variable and branding', () => {
+    const templatePath = path.resolve('email-templates', 'reset-password.html');
+    assert.ok(fs.existsSync(templatePath), 'reset-password.html must exist');
+    const content = fs.readFileSync(templatePath, 'utf8');
+
+    assert.ok(content.includes('StockSense'), 'Must include brand name StockSense');
+    assert.ok(content.includes('Know Your Stock. Grow Your Business.'), 'Must include brand tagline');
+    assert.ok(content.includes('Reset Password'), 'CTA button must be labeled "Reset Password"');
+    assert.ok(content.includes('Reset your password | StockSense'), 'Title/Subject must match specification');
+    assert.ok(content.includes('{{ .ConfirmationURL }}'), 'Must preserve {{ .ConfirmationURL }} variable');
+});
+
+test('Magic link and invite templates exist and preserve ConfirmationURL variable', () => {
+    const magicPath = path.resolve('email-templates', 'magic-link.html');
+    const invitePath = path.resolve('email-templates', 'invite-user.html');
+    assert.ok(fs.existsSync(magicPath), 'magic-link.html must exist');
+    assert.ok(fs.existsSync(invitePath), 'invite-user.html must exist');
+
+    assert.ok(fs.readFileSync(magicPath, 'utf8').includes('{{ .ConfirmationURL }}'));
+    assert.ok(fs.readFileSync(invitePath, 'utf8').includes('{{ .ConfirmationURL }}'));
 });
 
 console.log(`\n=================================================`);

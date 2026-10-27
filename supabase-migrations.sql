@@ -707,15 +707,27 @@ SECURITY DEFINER
 SET search_path = public, auth
 AS $$
 DECLARE
-    v_caller UUID;
-    v_caller_role TEXT;
-    v_target_role TEXT;
-    v_target_email TEXT;
-    v_target_name TEXT;
+    c_owner_email CONSTANT TEXT := 'ezeoforchioma2@gmail.com';
+    v_caller        UUID := auth.uid();
+    v_caller_role   TEXT;
+    v_target_role   TEXT;
+    v_target_email  TEXT;
+    v_target_name   TEXT;
+    v_movements     INTEGER := 0;
+    v_products      INTEGER := 0;
+    v_permissions   INTEGER := 0;
+    v_roles         INTEGER := 0;
+    v_profiles      INTEGER := 0;
+    v_feedback      INTEGER := 0;
+    v_auth_deleted  INTEGER := 0;
 BEGIN
-    v_caller := auth.uid();
-    IF NOT is_platform_admin(v_caller) THEN
+    -- 1. Authenticate + authorize the caller on the server.
+    IF v_caller IS NULL OR NOT is_platform_admin(v_caller) THEN
         RAISE EXCEPTION 'Access denied: Platform administrator privileges required.';
+    END IF;
+
+    IF p_target_user_id IS NULL THEN
+        RAISE EXCEPTION 'A target user id is required.';
     END IF;
 
     -- Self-deletion prevention
@@ -723,23 +735,33 @@ BEGIN
         RAISE EXCEPTION 'You cannot delete your own administrator account.';
     END IF;
 
-    -- Fetch target details
-    SELECT email INTO v_target_email FROM auth.users WHERE id = p_target_user_id;
+    -- 2. Resolve (and lock) the REAL Supabase Auth account. No row = no success.
+    SELECT u.email INTO v_target_email
+    FROM auth.users u
+    WHERE u.id = p_target_user_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'No Supabase Auth account exists for user id %. Nothing was deleted.', p_target_user_id;
+    END IF;
+
     SELECT full_name INTO v_target_name FROM public.profiles WHERE id = p_target_user_id;
     SELECT role INTO v_target_role FROM public.platform_roles WHERE user_id = p_target_user_id;
     v_caller_role := get_user_role(v_caller);
 
-    -- Owner protection: Nobody can delete the Owner (checked by role and hard-pinned email)
-    IF v_target_role = 'owner' OR LOWER(COALESCE(v_target_email, '')) = 'ezeoforchioma2@gmail.com' THEN
+    -- 3. Owner protection: Nobody can delete the Owner (checked by role, helper, and hard-pinned email)
+    IF v_target_role = 'owner'
+       OR is_platform_owner(p_target_user_id)
+       OR LOWER(COALESCE(v_target_email, '')) = c_owner_email THEN
         RAISE EXCEPTION 'Cannot delete the Platform Owner account (ezeoforchioma2@gmail.com).';
     END IF;
 
-    -- Hierarchy check: Only the Owner can delete other Admins
-    IF v_target_role = 'admin' AND v_caller_role <> 'owner' THEN
+    -- 4. Hierarchy check: Only the Owner can delete other Admins
+    IF v_target_role = 'admin' AND v_caller_role IS DISTINCT FROM 'owner' THEN
         RAISE EXCEPTION 'Only the Platform Owner can delete an Administrator account.';
     END IF;
 
-    -- Pre-deletion Audit Log
+    -- 5. Pre-deletion Audit Log
     IF to_regclass('public.admin_audit_logs') IS NOT NULL THEN
         INSERT INTO public.admin_audit_logs (actor_id, action, target_type, target_id, details)
         VALUES (
@@ -756,9 +778,10 @@ BEGIN
         );
     END IF;
 
-    -- Clear references where ON DELETE SET NULL applies (defensive to_regclass checks)
+    -- 6. Clear references where ON DELETE SET NULL applies (defensive to_regclass checks)
     IF to_regclass('public.feedback') IS NOT NULL THEN
         EXECUTE 'UPDATE public.feedback SET user_id = NULL WHERE user_id = $1' USING p_target_user_id;
+        GET DIAGNOSTICS v_feedback = ROW_COUNT;
     END IF;
 
     IF to_regclass('public.platform_roles') IS NOT NULL THEN
@@ -768,10 +791,11 @@ BEGIN
     IF to_regclass('public.staff_permissions') IS NOT NULL THEN
         EXECUTE 'UPDATE public.staff_permissions SET granted_by = NULL WHERE granted_by = $1' USING p_target_user_id;
         EXECUTE 'DELETE FROM public.staff_permissions WHERE user_id = $1' USING p_target_user_id;
+        GET DIAGNOSTICS v_permissions = ROW_COUNT;
     END IF;
 
     IF to_regclass('public.platform_settings') IS NOT NULL THEN
-        UPDATE public.platform_settings SET updated_by = NULL WHERE updated_by = p_target_user_id;
+        EXECUTE 'UPDATE public.platform_settings SET updated_by = NULL WHERE updated_by = $1' USING p_target_user_id;
     END IF;
 
     -- Explicitly delete user stock movements and products in proper dependency order
@@ -780,28 +804,84 @@ BEGIN
         IF to_regclass('public.products') IS NOT NULL THEN
             DELETE FROM public.stock_movements WHERE product_id IN (SELECT id FROM public.products WHERE user_id = p_target_user_id);
         END IF;
+        GET DIAGNOSTICS v_movements = ROW_COUNT;
     END IF;
 
     IF to_regclass('public.products') IS NOT NULL THEN
         DELETE FROM public.products WHERE user_id = p_target_user_id;
+        GET DIAGNOSTICS v_products = ROW_COUNT;
     END IF;
 
     IF to_regclass('public.platform_roles') IS NOT NULL THEN
         DELETE FROM public.platform_roles WHERE user_id = p_target_user_id;
+        GET DIAGNOSTICS v_roles = ROW_COUNT;
     END IF;
 
     IF to_regclass('public.profiles') IS NOT NULL THEN
         DELETE FROM public.profiles WHERE id = p_target_user_id;
+        GET DIAGNOSTICS v_profiles = ROW_COUNT;
     END IF;
 
-    -- Delete from auth.users (Cascades to remaining auth session records)
+    -- 7. Delete from auth.users (Cascades to GoTrue session records and identities)
     DELETE FROM auth.users WHERE id = p_target_user_id;
+    GET DIAGNOSTICS v_auth_deleted = ROW_COUNT;
+
+    -- 8. Verify deletion: must delete exactly 1 row from auth.users and no identity remains
+    IF v_auth_deleted <> 1 THEN
+        RAISE EXCEPTION 'Supabase Auth account % was not deleted (rows affected: %). All changes were rolled back.',
+            p_target_user_id, v_auth_deleted;
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM auth.users WHERE id = p_target_user_id)
+       OR EXISTS (SELECT 1 FROM auth.identities WHERE user_id = p_target_user_id) THEN
+        RAISE EXCEPTION 'Supabase Auth account % still exists after deletion. All changes were rolled back.',
+            p_target_user_id;
+    END IF;
 
     RETURN jsonb_build_object(
         'success', TRUE,
+        'auth_user_deleted', TRUE,
         'deleted_user_id', p_target_user_id,
-        'email', v_target_email
+        'email', v_target_email,
+        'removed', jsonb_build_object(
+            'stock_movements', v_movements,
+            'products', v_products,
+            'staff_permissions', v_permissions,
+            'platform_roles', v_roles,
+            'profiles', v_profiles
+        ),
+        'retained_anonymised', jsonb_build_object(
+            'feedback', v_feedback
+        )
     );
+END;
+$$;
+
+-- By-email variant for administrator convenience
+CREATE OR REPLACE FUNCTION public.admin_delete_user_by_email(
+    p_target_email TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+    v_target_id UUID;
+BEGIN
+    IF p_target_email IS NULL OR trim(p_target_email) = '' THEN
+        RAISE EXCEPTION 'An email address is required.';
+    END IF;
+
+    SELECT id INTO v_target_id
+    FROM auth.users
+    WHERE LOWER(email) = LOWER(trim(p_target_email));
+
+    IF v_target_id IS NULL THEN
+        RAISE EXCEPTION 'No user account found with email: %', p_target_email;
+    END IF;
+
+    RETURN public.admin_delete_user(v_target_id);
 END;
 $$;
 
@@ -817,6 +897,7 @@ GRANT EXECUTE ON FUNCTION public.admin_toggle_suspension(UUID, BOOLEAN, TEXT) TO
 GRANT EXECUTE ON FUNCTION public.admin_assign_role(UUID, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.bootstrap_initial_owner() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_delete_user(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_delete_user_by_email(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_cleanup_non_owner_accounts() TO authenticated;
 
 -- ----------------------------------------------------------------------------
