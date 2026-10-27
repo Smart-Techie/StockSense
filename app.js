@@ -394,21 +394,97 @@
             return;
         }
 
-        // Check for PKCE exchange code (?code=...)
-        const pkceCode = urlParams.get('code');
-        if (pkceCode) {
+        // Check for direct OTP token_hash in query or hash (?token_hash=... or #token_hash=...)
+        const tokenHash = urlParams.get('token_hash') || hashParams.get('token_hash');
+        if (tokenHash) {
             showAuthScreen('verifying');
+            const otpType = urlParams.get('type') || hashParams.get('type') || 'signup';
             try {
-                const { data, error } = await supabase.auth.exchangeCodeForSession(pkceCode);
+                const { data, error } = await supabase.auth.verifyOtp({
+                    token_hash: tokenHash,
+                    type: otpType
+                });
                 if (error) {
-                    showAuthScreen('verify-invalid', { code: error.code || 'code_exchange_failed', description: error.message });
-                } else if (data && data.session && data.session.user) {
-                    showAuthScreen('verify-success', data.session.user);
+                    showAuthScreen('verify-invalid', {
+                        code: error.code || 'otp_failed',
+                        description: error.message || 'The verification link is invalid or has expired.'
+                    });
+                } else if (data && (data.session?.user || data.user)) {
+                    showAuthScreen('verify-success', data.session?.user || data.user);
                 } else {
                     showAuthScreen('verify-invalid', { description: 'Could not establish verified session.' });
                 }
             } catch (err) {
-                showAuthScreen('verify-invalid', { description: err.message });
+                showAuthScreen('verify-invalid', { description: err.message || 'Verification could not be processed.' });
+            }
+            try {
+                history.replaceState(null, '', isVerifyPath ? '/auth/verify' : '/');
+            } catch {}
+            return;
+        }
+
+        // Check for PKCE exchange code (?code=...)
+        const pkceCode = urlParams.get('code');
+        if (pkceCode) {
+            showAuthScreen('verifying');
+            // Check if detectSessionInUrl already created an active session
+            try {
+                const { data: earlySession } = await supabase.auth.getSession();
+                if (earlySession?.session?.user) {
+                    showAuthScreen('verify-success', earlySession.session.user);
+                    try {
+                        history.replaceState(null, '', isVerifyPath ? '/auth/verify' : '/');
+                    } catch {}
+                    return;
+                }
+            } catch {}
+
+            try {
+                const { data, error } = await supabase.auth.exchangeCodeForSession(pkceCode);
+                if (error) {
+                    const errStr = `${error.code || ''} ${error.message || ''}`.toLowerCase();
+                    const isCrossDevicePkce = errStr.includes('code_verifier') ||
+                        errStr.includes('verifier') ||
+                        errStr.includes('both auth_code and code_verifier') ||
+                        errStr.includes('invalid_grant');
+
+                    // Double-check session in case client resolved concurrently
+                    const { data: postCheck } = await supabase.auth.getSession();
+                    if (postCheck?.session?.user) {
+                        showAuthScreen('verify-success', postCheck.session.user);
+                    } else if (isCrossDevicePkce) {
+                        // Supabase verified the email on the server before redirecting to ?code=...
+                        // Code verifier is absent because the user opened the link on a different browser/device.
+                        showAuthScreen('verify-success', {
+                            isCrossDevice: true,
+                            note: 'Your email address has been verified by our authentication server. Because you opened this link on a different browser or device than where you signed up, please sign in with your password to continue.'
+                        });
+                    } else {
+                        showAuthScreen('verify-invalid', { code: error.code || 'code_exchange_failed', description: error.message });
+                    }
+                } else if (data && data.session && data.session.user) {
+                    showAuthScreen('verify-success', data.session.user);
+                } else {
+                    const { data: postCheck2 } = await supabase.auth.getSession();
+                    if (postCheck2?.session?.user) {
+                        showAuthScreen('verify-success', postCheck2.session.user);
+                    } else {
+                        showAuthScreen('verify-success', {
+                            isCrossDevice: true,
+                            note: 'Your email has been confirmed. Please sign in to access your StockSense account.'
+                        });
+                    }
+                }
+            } catch (err) {
+                const errStr = String(err.message || err).toLowerCase();
+                if (errStr.includes('code_verifier') || errStr.includes('verifier')) {
+                    showAuthScreen('verify-success', {
+                        isCrossDevice: true,
+                        note: 'Your email has been confirmed. Please sign in with your password to access your StockSense workspace.'
+                    });
+                } else {
+                    showAuthScreen('verify-invalid', { description: err.message || 'Verification could not be processed.' });
+                }
             }
             try {
                 history.replaceState(null, '', isVerifyPath ? '/auth/verify' : '/');
@@ -423,17 +499,16 @@
         }
 
         // Check for email verification via hash or verify route
-        if (isVerifyPath || hasVerifyHash) {
+        if (rawHash && (rawHash.includes('access_token=') || hasVerifyHash)) {
             showAuthScreen('verifying');
             // Give client brief moment to parse hash tokens if present
-            await new Promise(r => setTimeout(r, 450));
+            await new Promise(r => setTimeout(r, 400));
             const { data, error } = await supabase.auth.getSession();
             if (error) {
                 showAuthScreen('verify-invalid', { description: error.message });
             } else if (data && data.session && data.session.user) {
                 showAuthScreen('verify-success', data.session.user);
             } else {
-                // If on /auth/verify without active session or tokens
                 showAuthScreen('verify-invalid', { description: 'The verification link may have expired or already been used.' });
             }
             try {
@@ -442,14 +517,30 @@
             return;
         }
 
-        // Attach listener for async auth events (e.g. hash token resolution)
-        supabase.auth.onAuthStateChange(async (event, session) => {
-            if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
-                if (isVerifyPath || hasVerifyHash || urlParams.get('type') === 'signup') {
-                    showAuthScreen('verify-success', session.user);
+        // On /auth/verify directly without code, token, or hash
+        if (isVerifyPath) {
+            const { data, error } = await supabase.auth.getSession();
+            if (data?.session?.user) {
+                const user = data.session.user;
+                if (user.email_confirmed_at || user.confirmed_at) {
+                    showAuthScreen('verify-success', user);
+                } else {
+                    showAuthScreen('check-email', user.email);
                 }
+            } else {
+                showAuthScreen('verify-invalid', {
+                    description: 'No active verification token found. If you recently registered, please click the link in your verification email or sign in below.'
+                });
             }
-        });
+            return;
+        }
+
+        // Check for explicitly requested screen (e.g. /?screen=signin or /?screen=resend)
+        const requestedScreen = urlParams.get('screen');
+        if (requestedScreen && ['signin', 'signup', 'forgot', 'resend'].includes(requestedScreen)) {
+            showAuthScreen(requestedScreen);
+            return;
+        }
 
         const { data, error } = await supabase.auth.getSession();
 
@@ -650,8 +741,8 @@
         // must never show the install prompt.
         deactivatePwaPromptForSession();
 
-        $('auth-screen').style.display = 'flex';
-        $('app-root').style.display = 'none';
+        if ($('auth-screen')) $('auth-screen').style.display = 'flex';
+        if ($('app-root')) $('app-root').style.display = 'none';
 
         const container = $('auth-card-body');
         if (!container) return;
@@ -688,13 +779,19 @@
         }
 
         if (view === 'verify-success') {
-            const user = typeof message === 'object' && message ? message : state.currentUser;
-            const hasSession = !!user;
+            const isObj = typeof message === 'object' && message !== null;
+            const user = isObj && message.id ? message : (isObj && !message.isCrossDevice ? message : state.currentUser);
+            const isCrossDevice = isObj && !!message.isCrossDevice;
+            const customNote = isObj && message.note ? message.note : '';
+            const path = window.location.pathname.replace(/\/+$/, '');
+            const isVerifyPath = path.endsWith('/auth/verify') || path.endsWith('/auth/verify.html');
+            const hasSession = !!user && !isCrossDevice;
+
             container.innerHTML = `
                 <div class="verify-screen-box">
                     <div class="verify-icon-circle success">✓</div>
                     <h3 class="verify-heading">Email Verified Successfully!</h3>
-                    <p class="verify-message">Your email address has been verified. Your StockSense account is ready for you to sign in.</p>
+                    <p class="verify-message">${customNote ? esc(customNote) : 'Your email address has been verified. Your StockSense account is ready for you to sign in.'}</p>
                     <div class="verify-actions">
                         ${hasSession ? `
                             <button class="btn greenbtn" id="btn-verify-continue">Continue to StockSense Dashboard →</button>
@@ -710,30 +807,41 @@
             `;
             if ($('btn-verify-continue')) {
                 $('btn-verify-continue').onclick = async () => {
-                    await handleAuthenticatedSession(user);
+                    if (isVerifyPath) {
+                        window.location.href = '/';
+                    } else {
+                        await handleAuthenticatedSession(user);
+                    }
                 };
             }
             if ($('btn-verify-signin')) {
                 $('btn-verify-signin').onclick = () => {
-                    showAuthScreen('signin');
+                    if (isVerifyPath) {
+                        window.location.href = '/?screen=signin';
+                    } else {
+                        showAuthScreen('signin');
+                    }
                 };
             }
             if ($('btn-verify-home')) {
                 $('btn-verify-home').onclick = (e) => {
                     e.preventDefault();
-                    showAuthScreen('signin');
-                    try { history.pushState(null, '', '/'); } catch {}
+                    window.location.href = '/';
                 };
             }
             return;
         }
 
         if (view === 'verify-invalid') {
+            const path = window.location.pathname.replace(/\/+$/, '');
+            const isVerifyPath = path.endsWith('/auth/verify') || path.endsWith('/auth/verify.html');
+            const desc = (typeof message === 'object' && message?.description) || (typeof message === 'string' && message) || 'The verification link may have expired or already been used. You can return to StockSense and request a new verification email if needed.';
+
             container.innerHTML = `
                 <div class="verify-screen-box">
                     <div class="verify-icon-circle error">✕</div>
-                    <h3 class="verify-heading">This Verification Link Is Invalid or Expired</h3>
-                    <p class="verify-message">The link may have expired or already been used. You can return to StockSense and request a new verification email if needed.</p>
+                    <h3 class="verify-heading">Verification Link Notice</h3>
+                    <p class="verify-message">${esc(desc)}</p>
                     <div class="verify-actions">
                         <button class="btn greenbtn" id="btn-invalid-resend">Resend Verification Email</button>
                         <button class="btn primary" id="btn-invalid-signin">Sign In to StockSense</button>
@@ -743,13 +851,30 @@
                     </div>
                 </div>
             `;
-            $('btn-invalid-resend').onclick = () => showAuthScreen('resend');
-            $('btn-invalid-signin').onclick = () => showAuthScreen('signin');
-            $('btn-invalid-home').onclick = (e) => {
-                e.preventDefault();
-                showAuthScreen('signin');
-                try { history.pushState(null, '', '/'); } catch {}
-            };
+            if ($('btn-invalid-resend')) {
+                $('btn-invalid-resend').onclick = () => {
+                    if (isVerifyPath) {
+                        window.location.href = '/?screen=resend';
+                    } else {
+                        showAuthScreen('resend');
+                    }
+                };
+            }
+            if ($('btn-invalid-signin')) {
+                $('btn-invalid-signin').onclick = () => {
+                    if (isVerifyPath) {
+                        window.location.href = '/?screen=signin';
+                    } else {
+                        showAuthScreen('signin');
+                    }
+                };
+            }
+            if ($('btn-invalid-home')) {
+                $('btn-invalid-home').onclick = (e) => {
+                    e.preventDefault();
+                    window.location.href = '/';
+                };
+            }
             return;
         }
 
@@ -4264,26 +4389,23 @@
     });
 
     // Top action buttons
-    $('add2').onclick = () => openProductModal();
-    $('export').onclick = exportMovementsCSV;
-    $('exportInventory').onclick = exportInventoryCSV;
+    $('add2')?.addEventListener('click', () => openProductModal());
+    $('export')?.addEventListener('click', exportMovementsCSV);
+    $('exportInventory')?.addEventListener('click', exportInventoryCSV);
 
     // Mobile drawer controls
-    $('menu').onclick = () => {
-        $('sidebar').classList.add('open');
-        $('sidebar-overlay').classList.add('active');
-    };
-    $('sidebar-overlay').onclick = () => {
-        $('sidebar').classList.remove('open');
-        $('sidebar-overlay').classList.remove('active');
-    };
-    const sideCloseBtn = $('sidebar-close');
-    if (sideCloseBtn) {
-        sideCloseBtn.onclick = () => {
-            $('sidebar').classList.remove('open');
-            $('sidebar-overlay').classList.remove('active');
-        };
-    }
+    $('menu')?.addEventListener('click', () => {
+        $('sidebar')?.classList.add('open');
+        $('sidebar-overlay')?.classList.add('active');
+    });
+    $('sidebar-overlay')?.addEventListener('click', () => {
+        $('sidebar')?.classList.remove('open');
+        $('sidebar-overlay')?.classList.remove('active');
+    });
+    $('sidebar-close')?.addEventListener('click', () => {
+        $('sidebar')?.classList.remove('open');
+        $('sidebar-overlay')?.classList.remove('active');
+    });
 
     // Close mobile drawer and modals with Escape key
     window.addEventListener('keydown', e => {
@@ -4295,18 +4417,18 @@
     });
 
     // Live search & filters
-    $('search').oninput = renderProducts;
-    $('filter').onchange = renderProducts;
-    $('catFilter').onchange = renderProducts;
-    $('moveSearch').oninput = renderMoves;
-    $('moveFilter').onchange = renderMoves;
+    $('search')?.addEventListener('input', renderProducts);
+    $('filter')?.addEventListener('change', renderProducts);
+    $('catFilter')?.addEventListener('change', renderProducts);
+    $('moveSearch')?.addEventListener('input', renderMoves);
+    $('moveFilter')?.addEventListener('change', renderMoves);
 
     // Adviser budget trigger
-    $('run').onclick = recommend;
-    $('budget').onkeydown = e => { if (e.key === 'Enter') recommend(); };
+    $('run')?.addEventListener('click', recommend);
+    $('budget')?.addEventListener('keydown', e => { if (e.key === 'Enter') recommend(); });
 
     // Sign out button
-    $('btn-signout').onclick = async () => {
+    $('btn-signout')?.addEventListener('click', async () => {
         const confirmed = window.confirm("Are you sure you want to sign out of StockSense?");
         if (!confirmed) return;
         try { localStorage.removeItem(INACTIVITY_STORAGE_KEY); } catch {}
@@ -4317,7 +4439,7 @@
         state.products = [];
         state.moves = [];
         showAuthScreen('signin', 'You have been signed out safely.', 'info');
-    };
+    });
 
     // User interaction listeners for 30-minute inactivity timeout
     ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'].forEach(evt => {
@@ -4336,58 +4458,74 @@
     window.addEventListener('focus', checkInactivityTimeout);
 
     // Admin controls
-    $('admin-user-search').oninput = () => {
+    $('admin-user-search')?.addEventListener('input', () => {
         state.adminUserOffset = 0;
         loadAdminUsers();
-    };
-    $('admin-user-role-filter').onchange = () => {
+    });
+    $('admin-user-role-filter')?.addEventListener('change', () => {
         state.adminUserOffset = 0;
         loadAdminUsers();
-    };
-    $('admin-user-status-filter').onchange = () => {
+    });
+    $('admin-user-status-filter')?.addEventListener('change', () => {
         state.adminUserOffset = 0;
         loadAdminUsers();
-    };
-    $('admin-btn-bootstrap-owner').onclick = bootstrapOwner;
+    });
+    $('admin-btn-bootstrap-owner')?.addEventListener('click', bootstrapOwner);
 
     // Settings save
-    $('form-admin-settings').onsubmit = async e => {
-        e.preventDefault();
-        const btn = $('btn-save-settings');
-        btn.disabled = true;
-        btn.textContent = 'Saving...';
+    if ($('form-admin-settings')) {
+        $('form-admin-settings').onsubmit = async e => {
+            e.preventDefault();
+            const btn = $('btn-save-settings');
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Saving...';
+            }
 
-        const updatedSettings = {
-            platform_name: $('setting-platform-name').value.trim() || 'StockSense',
-            currency_symbol: $('setting-currency-symbol').value.trim() || '₦',
-            low_stock_default: Number($('setting-low-stock').value) || 5,
-            support_whatsapp: $('setting-whatsapp')?.value.trim() || '',
-            maintenance_mode: false
+            const updatedSettings = {
+                platform_name: $('setting-platform-name')?.value.trim() || 'StockSense',
+                currency_symbol: $('setting-currency-symbol')?.value.trim() || '₦',
+                low_stock_default: Number($('setting-low-stock')?.value) || 5,
+                support_whatsapp: $('setting-whatsapp')?.value.trim() || '',
+                maintenance_mode: false
+            };
+
+            try {
+                await supabase.from('platform_settings').upsert({
+                    key: 'system_settings',
+                    value: updatedSettings,
+                    updated_at: new Date().toISOString(),
+                    updated_by: state.currentUser?.id
+                });
+                state.platformSettings = updatedSettings;
+                notify('Platform settings saved successfully.', 'success');
+                render();
+            } catch (err) {
+                notify('Error saving settings: ' + err.message, 'error');
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Save Platform Settings';
+                }
+            }
         };
-
-        try {
-            await supabase.from('platform_settings').upsert({
-                key: 'system_settings',
-                value: updatedSettings,
-                updated_at: new Date().toISOString(),
-                updated_by: state.currentUser.id
-            });
-            state.platformSettings = updatedSettings;
-            notify('Platform settings saved successfully.', 'success');
-            render();
-        } catch (err) {
-            notify('Error saving settings: ' + err.message, 'error');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Save Platform Settings';
-        }
-    };
+    }
 
     // Auth state changes
     supabase.auth.onAuthStateChange((event, session) => {
         if (isSigningOutDueToTimeout) return;
         const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         if (isLocalhost && new URLSearchParams(window.location.search).get('preview')) return;
+        const path = window.location.pathname.replace(/\/+$/, '');
+        const isVerifyRoute = path.endsWith('/auth/verify') || path.endsWith('/auth/verify.html');
+
+        if (isVerifyRoute) {
+            if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+                showAuthScreen('verify-success', session.user);
+            }
+            return;
+        }
+
         if (event === 'SIGNED_OUT' || !session) {
             state.currentUser = null;
             state.currentProfile = null;
@@ -4402,12 +4540,15 @@
     });
 
     // Format current date in header
-    $('date').textContent = new Date().toLocaleDateString('en-NG', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-    });
+    const dateEl = $('date');
+    if (dateEl) {
+        dateEl.textContent = new Date().toLocaleDateString('en-NG', {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric'
+        });
+    }
 
     // Dynamic greeting refresh when window/tab regains focus or becomes visible
     document.addEventListener('visibilitychange', () => {

@@ -28,7 +28,7 @@
                 <p class="auth-subtitle">Know Your Stock. Grow Your Business.</p>
             </div>
             <div id="auth-card-body">
-                <div class="verify-screen-box">
+                <div class="verify-screen-box" id="verify-initial-loading">
                     <div class="verify-icon-circle loading">
                         <div class="verify-spinner"></div>
                     </div>
@@ -54,6 +54,27 @@
     <script src="/supabase-config.js"></script>
     <script src="/app.js"></script>
 
+    <!-- Fallback timer: prevents permanent freeze if network or CDN drops -->
+    <script>
+        setTimeout(function() {
+            var initialBox = document.getElementById('verify-initial-loading');
+            if (initialBox && initialBox.parentElement) {
+                var cardBody = document.getElementById('auth-card-body');
+                if (cardBody) {
+                    cardBody.innerHTML = 
+                        '<div class="verify-screen-box">' +
+                            '<div class="verify-icon-circle" style="background:rgba(168,85,247,0.15);border:2px solid var(--lav);color:var(--lav)">ℹ</div>' +
+                            '<h3 class="verify-heading">Verification Session Notice</h3>' +
+                            '<p class="verify-message">Verification is taking longer than expected. If your email was already confirmed or you verified on another device, you can proceed directly to sign in.</p>' +
+                            '<div class="verify-actions">' +
+                                '<a class="btn greenbtn" href="/" style="display:inline-block;text-decoration:none;padding:12px 24px">Sign In to StockSense →</a>' +
+                                '<div><a href="/" style="color:var(--muted);font-size:13px;text-decoration:none">Return to Home</a></div>' +
+                            '</div>' +
+                        '</div>';
+                }
+            }
+        }, 6000);
+    </script>
 </body>
 
 </html>

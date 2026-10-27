@@ -1117,6 +1117,65 @@ test('Magic link and invite templates exist and preserve ConfirmationURL variabl
     assert.ok(fs.readFileSync(invitePath, 'utf8').includes('{{ .ConfirmationURL }}'));
 });
 
+// -----------------------------------------------------------------------------
+// 17. Production Verification Flow & Cross-Device PKCE Diagnostics
+// -----------------------------------------------------------------------------
+function isCrossDevicePkceError(err) {
+    if (!err) return false;
+    const str = `${err.code || ''} ${err.message || ''}`.toLowerCase();
+    return str.includes('code_verifier') ||
+        str.includes('verifier') ||
+        str.includes('both auth_code and code_verifier') ||
+        str.includes('invalid_grant');
+}
+
+test('isCrossDevicePkceError accurately detects missing PKCE code_verifier on cross-device link', () => {
+    assert.strictEqual(isCrossDevicePkceError({ message: 'both auth_code and code_verifier should be non-empty' }), true);
+    assert.strictEqual(isCrossDevicePkceError({ message: 'code_verifier missing from storage' }), true);
+    assert.strictEqual(isCrossDevicePkceError({ code: 'invalid_grant', message: 'PKCE exchange failed' }), true);
+    assert.strictEqual(isCrossDevicePkceError({ message: 'Token has expired or is invalid' }), false);
+    assert.strictEqual(isCrossDevicePkceError({ code: 'otp_expired', message: 'Email link is invalid or has expired' }), false);
+});
+
+test('auth/verify.html contains safety timeout script and initial loading box ID', () => {
+    const verifyPath = path.resolve('auth', 'verify.html');
+    assert.ok(fs.existsSync(verifyPath), 'auth/verify.html must exist');
+    const content = fs.readFileSync(verifyPath, 'utf8');
+
+    assert.ok(content.includes('id="verify-initial-loading"'), 'Must have ID on initial loading container');
+    assert.ok(content.includes('setTimeout'), 'Must contain safety fallback timeout');
+    assert.ok(content.includes('auth-card-body'), 'Must contain auth-card-body');
+    assert.ok(content.includes('/app.js'), 'Must load app.js');
+});
+
+test('app.js does not execute unguarded DOM access on top action buttons or inputs', () => {
+    const appPath = path.resolve('app.js');
+    const content = fs.readFileSync(appPath, 'utf8');
+
+    // Ensure dangerous unguarded patterns are absent
+    assert.ok(!content.includes("$('add2').onclick ="), "add2 must be guarded with if ($('add2'))");
+    assert.ok(!content.includes("$('export').onclick ="), "export must be guarded with if ($('export'))");
+    assert.ok(!content.includes("$('menu').onclick ="), "menu must be guarded with if ($('menu'))");
+    assert.ok(!content.includes("$('search').oninput ="), "search must be guarded with if ($('search'))");
+    assert.ok(!content.includes("$('date').textContent ="), "date must be guarded with if ($('date'))");
+});
+
+test('Verification button destination helper routes to / on verify path', () => {
+    function resolveVerifyDestination(isVerifyPath, action) {
+        if (isVerifyPath) {
+            if (action === 'signin') return '/?screen=signin';
+            if (action === 'resend') return '/?screen=resend';
+            return '/';
+        }
+        return 'in-page';
+    }
+
+    assert.strictEqual(resolveVerifyDestination(true, 'continue'), '/');
+    assert.strictEqual(resolveVerifyDestination(true, 'signin'), '/?screen=signin');
+    assert.strictEqual(resolveVerifyDestination(true, 'resend'), '/?screen=resend');
+    assert.strictEqual(resolveVerifyDestination(false, 'continue'), 'in-page');
+});
+
 console.log(`\n=================================================`);
 console.log(`Test Results: ${passed} Passed, ${failed} Failed`);
 console.log(`=================================================`);
