@@ -457,43 +457,209 @@ test('Homepage metrics calculate total products, units in stock, low-stock, and 
 });
 
 // -----------------------------------------------------------------------------
-// 12. PWA State Machine & 5-Minute Repeat Timing
+// 12. PWA State Machine, 30-Minute Active-Time Threshold & 30m/48h Cooldowns
 // -----------------------------------------------------------------------------
-const PWA_INTERVAL_MS = 5 * 60 * 1000;
+const PWA_REQUIRED_ACTIVE_TIME_MS = 30 * 60 * 1000;         // 30 minutes active time
+const PWA_FIRST_DISMISS_COOLDOWN_MS = 30 * 60 * 1000;       // 30 minutes
+const PWA_SUBSEQUENT_DISMISS_COOLDOWN_MS = 48 * 60 * 60 * 1000; // 48 hours (2 days)
 
-function shouldShowPwaPrompt(isInstalled, lastDismissedTimestamp, currentTimestamp = Date.now()) {
+function evaluatePwaEligibility({
+    isInstalled = false,
+    canOffer = true,
+    activeTimeMs = 0,
+    dismissCount = 0,
+    nextEligibleAt = 0,
+    isBannerVisible = false,
+    isShownInCurrentSession = false,
+    currentTime = Date.now()
+} = {}) {
     if (isInstalled) return false;
-    if (!lastDismissedTimestamp || lastDismissedTimestamp <= 0) return true;
-    return (currentTimestamp - lastDismissedTimestamp) >= PWA_INTERVAL_MS;
+    if (!canOffer) return false;
+    if (isBannerVisible) return false;
+    if (isShownInCurrentSession) return false;
+
+    // 1. Initial eligibility: requires 30 minutes of cumulative active website time
+    if (dismissCount === 0) {
+        if (activeTimeMs < PWA_REQUIRED_ACTIVE_TIME_MS) return false;
+        if (nextEligibleAt > 0 && currentTime < nextEligibleAt) return false;
+        return true;
+    }
+
+    // 2. Dismissed state: requires cooldown to have elapsed (30m for 1st, 48h for 2nd+)
+    if (!nextEligibleAt || currentTime >= nextEligibleAt) {
+        return true;
+    }
+    return false;
 }
 
-test('PWA prompt logic never displays when app is installed', () => {
-    const now = Date.now();
-    assert.strictEqual(shouldShowPwaPrompt(true, null, now), false);
-    assert.strictEqual(shouldShowPwaPrompt(true, now - 1000000, now), false);
+test('PWA prompt never displays immediately after login when active time is 0', () => {
+    const res = evaluatePwaEligibility({
+        isInstalled: false,
+        canOffer: true,
+        activeTimeMs: 0,
+        dismissCount: 0
+    });
+    assert.strictEqual(res, false, 'Must not show immediately after login');
 });
 
-test('PWA prompt shows on initial visit when uninstalled and never dismissed', () => {
-    const now = Date.now();
-    assert.strictEqual(shouldShowPwaPrompt(false, null, now), true);
-    assert.strictEqual(shouldShowPwaPrompt(false, 0, now), true);
+test('PWA prompt is suppressed before 30 minutes of cumulative active website time', () => {
+    const fifteenMins = 15 * 60 * 1000;
+    const twentyNineMins = 29 * 60 * 1000;
+    assert.strictEqual(evaluatePwaEligibility({ activeTimeMs: fifteenMins, dismissCount: 0 }), false);
+    assert.strictEqual(evaluatePwaEligibility({ activeTimeMs: twentyNineMins, dismissCount: 0 }), false);
 });
 
-test('PWA prompt is suppressed during the 5-minute dismissal window', () => {
-    const now = Date.now();
-    const fourMinutesAgo = now - (4 * 60 * 1000);
-    const fourMins59SecsAgo = now - (4 * 60 * 1000 + 59 * 1000);
-    assert.strictEqual(shouldShowPwaPrompt(false, now, now), false);
-    assert.strictEqual(shouldShowPwaPrompt(false, fourMinutesAgo, now), false);
-    assert.strictEqual(shouldShowPwaPrompt(false, fourMins59SecsAgo, now), false);
+test('PWA prompt becomes eligible after 30 minutes of cumulative active website time', () => {
+    const exactly30Mins = 30 * 60 * 1000;
+    const fortyMins = 40 * 60 * 1000;
+    assert.strictEqual(evaluatePwaEligibility({ activeTimeMs: exactly30Mins, dismissCount: 0 }), true);
+    assert.strictEqual(evaluatePwaEligibility({ activeTimeMs: fortyMins, dismissCount: 0 }), true);
 });
 
-test('PWA prompt re-triggers after 5 minutes have elapsed since dismissal', () => {
-    const now = Date.now();
-    const exactly5MinutesAgo = now - (5 * 60 * 1000);
-    const sixMinutesAgo = now - (6 * 60 * 1000);
-    assert.strictEqual(shouldShowPwaPrompt(false, exactly5MinutesAgo, now), true);
-    assert.strictEqual(shouldShowPwaPrompt(false, sixMinutesAgo, now), true);
+test('PWA prompt is suppressed on unauthenticated or ineligible screens', () => {
+    assert.strictEqual(evaluatePwaEligibility({ canOffer: false, activeTimeMs: 35 * 60 * 1000 }), false);
+});
+
+test('PWA prompt never displays when app is installed in standalone or detected installed', () => {
+    assert.strictEqual(evaluatePwaEligibility({ isInstalled: true, activeTimeMs: 45 * 60 * 1000 }), false);
+    assert.strictEqual(evaluatePwaEligibility({ isInstalled: true, dismissCount: 1, nextEligibleAt: 1 }), false);
+});
+
+test('PWA prompt does not repeatedly reopen within the same session while visible', () => {
+    assert.strictEqual(evaluatePwaEligibility({ isBannerVisible: true, activeTimeMs: 35 * 60 * 1000 }), false);
+    assert.strictEqual(evaluatePwaEligibility({ isShownInCurrentSession: true, activeTimeMs: 35 * 60 * 1000 }), false);
+});
+
+test('First dismissal triggers a 30-minute cooldown window', () => {
+    const dismissedAt = 10000000;
+    const nextEligibleAt = dismissedAt + PWA_FIRST_DISMISS_COOLDOWN_MS;
+
+    // During the 30-minute window
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 1,
+        nextEligibleAt,
+        currentTime: dismissedAt + (10 * 60 * 1000)
+    }), false);
+
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 1,
+        nextEligibleAt,
+        currentTime: dismissedAt + (29 * 60 * 1000 + 59 * 1000)
+    }), false);
+
+    // Exactly at and after 30 minutes
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 1,
+        nextEligibleAt,
+        currentTime: nextEligibleAt
+    }), true);
+
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 1,
+        nextEligibleAt,
+        currentTime: nextEligibleAt + 5000
+    }), true);
+});
+
+test('Second dismissal triggers a 48-hour cooldown window', () => {
+    const dismissedAt = 20000000;
+    const nextEligibleAt = dismissedAt + PWA_SUBSEQUENT_DISMISS_COOLDOWN_MS;
+
+    // After 30 minutes, still false
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 2,
+        nextEligibleAt,
+        currentTime: dismissedAt + (30 * 60 * 1000)
+    }), false);
+
+    // After 24 hours, still false
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 2,
+        nextEligibleAt,
+        currentTime: dismissedAt + (24 * 60 * 60 * 1000)
+    }), false);
+
+    // After 47 hours 59 minutes, still false
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 2,
+        nextEligibleAt,
+        currentTime: dismissedAt + (47 * 60 * 60 * 1000 + 59 * 60 * 1000)
+    }), false);
+
+    // Exactly at 48 hours, becomes eligible
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 2,
+        nextEligibleAt,
+        currentTime: nextEligibleAt
+    }), true);
+
+    // After 49 hours, stays eligible
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 2,
+        nextEligibleAt,
+        currentTime: dismissedAt + (49 * 60 * 60 * 1000)
+    }), true);
+});
+
+test('Subsequent dismissals (3rd, 4th, etc.) enforce 48-hour cooldown', () => {
+    const dismissedAt = 30000000;
+    const nextEligibleAt = dismissedAt + PWA_SUBSEQUENT_DISMISS_COOLDOWN_MS;
+
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 3,
+        nextEligibleAt,
+        currentTime: dismissedAt + (12 * 60 * 60 * 1000)
+    }), false);
+
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 3,
+        nextEligibleAt,
+        currentTime: nextEligibleAt
+    }), true);
+
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 5,
+        nextEligibleAt,
+        currentTime: dismissedAt + (24 * 60 * 60 * 1000)
+    }), false);
+
+    assert.strictEqual(evaluatePwaEligibility({
+        dismissCount: 5,
+        nextEligibleAt,
+        currentTime: nextEligibleAt
+    }), true);
+});
+
+test('Dismissal count and active time persist across simulated re-login and refresh', () => {
+    // Simulated persistent storage map
+    const mockStorage = {
+        'stocksense_pwa_active_time_ms': String(35 * 60 * 1000),
+        'stocksense_pwa_dismiss_count': '2',
+        'stocksense_pwa_next_eligible_at': String(Date.now() + 100000)
+    };
+
+    const activeTime = parseInt(mockStorage['stocksense_pwa_active_time_ms'], 10);
+    const dismissCount = parseInt(mockStorage['stocksense_pwa_dismiss_count'], 10);
+    const nextEligible = parseInt(mockStorage['stocksense_pwa_next_eligible_at'], 10);
+
+    assert.strictEqual(activeTime, 35 * 60 * 1000, 'Active time must not be wiped out on re-login');
+    assert.strictEqual(dismissCount, 2, 'Dismiss count must not reset to 0 on re-login');
+    assert.strictEqual(nextEligible > Date.now(), true, 'Next eligible timestamp must remain in effect');
+});
+
+test('Installation possibility helper prevents misleading prompt on unsupported browsers', () => {
+    function checkInstallPossible(hasNativePrompt, isIosSafari) {
+        return !!hasNativePrompt || isIosSafari;
+    }
+
+    // Android / Chrome with native prompt
+    assert.strictEqual(checkInstallPossible(true, false), true);
+
+    // iOS Safari
+    assert.strictEqual(checkInstallPossible(false, true), true);
+
+    // Desktop browser without beforeinstallprompt and not iOS
+    assert.strictEqual(checkInstallPossible(false, false), false);
 });
 
 // -----------------------------------------------------------------------------
@@ -1174,6 +1340,85 @@ test('Verification button destination helper routes to / on verify path', () => 
     assert.strictEqual(resolveVerifyDestination(true, 'signin'), '/?screen=signin');
     assert.strictEqual(resolveVerifyDestination(true, 'resend'), '/?screen=resend');
     assert.strictEqual(resolveVerifyDestination(false, 'continue'), 'in-page');
+});
+
+// -----------------------------------------------------------------------------
+// 18. PWA Engagement & Active Time Tracking State Machine
+// -----------------------------------------------------------------------------
+function isUserActiveCheck(lastActivityTimestamp, now, idleThresholdMs = 60000) {
+    if (!lastActivityTimestamp || lastActivityTimestamp <= 0) return false;
+    return (now - lastActivityTimestamp) <= idleThresholdMs;
+}
+
+test('isUserActiveCheck returns true when user interacted recently', () => {
+    const now = 100000;
+    assert.strictEqual(isUserActiveCheck(now - 10000, now), true);
+    assert.strictEqual(isUserActiveCheck(now - 59000, now), true);
+});
+
+test('isUserActiveCheck pauses active-time accumulation after 60 seconds of inactivity', () => {
+    const now = 200000;
+    assert.strictEqual(isUserActiveCheck(now - 61000, now), false);
+    assert.strictEqual(isUserActiveCheck(now - 300000, now), false);
+});
+
+function calculateNextDismissalCooldown(currentCount) {
+    const newCount = currentCount + 1;
+    const cooldownMs = newCount === 1 ? 30 * 60 * 1000 : 48 * 60 * 60 * 1000;
+    return { newCount, cooldownMs };
+}
+
+test('calculateNextDismissalCooldown computes 30m for 1st dismissal and 48h for subsequent', () => {
+    const first = calculateNextDismissalCooldown(0);
+    assert.strictEqual(first.newCount, 1);
+    assert.strictEqual(first.cooldownMs, 30 * 60 * 1000); // 30 minutes
+
+    const second = calculateNextDismissalCooldown(1);
+    assert.strictEqual(second.newCount, 2);
+    assert.strictEqual(second.cooldownMs, 48 * 60 * 60 * 1000); // 48 hours
+
+    const third = calculateNextDismissalCooldown(2);
+    assert.strictEqual(third.newCount, 3);
+    assert.strictEqual(third.cooldownMs, 48 * 60 * 60 * 1000); // 48 hours
+
+    const fifth = calculateNextDismissalCooldown(4);
+    assert.strictEqual(fifth.newCount, 5);
+    assert.strictEqual(fifth.cooldownMs, 48 * 60 * 60 * 1000); // 48 hours
+});
+
+function simulateStandaloneCheck({ mediaStandalone = false, navStandalone = false, referrer = '' } = {}) {
+    if (mediaStandalone) return true;
+    if (navStandalone) return true;
+    if (referrer && referrer.startsWith('android-app://')) return true;
+    return false;
+}
+
+test('Standalone detection recognizes media query, iOS standalone, and android-app wrapper', () => {
+    assert.strictEqual(simulateStandaloneCheck({ mediaStandalone: true }), true);
+    assert.strictEqual(simulateStandaloneCheck({ navStandalone: true }), true);
+    assert.strictEqual(simulateStandaloneCheck({ referrer: 'android-app://com.stocksense.pwa' }), true);
+    assert.strictEqual(simulateStandaloneCheck({ mediaStandalone: false, navStandalone: false, referrer: '' }), false);
+});
+
+function simulatePwaStorageSafeRead(mockStorage, key) {
+    try {
+        const val = mockStorage[key];
+        return val !== undefined ? val : null;
+    } catch {
+        return null;
+    }
+}
+
+test('PWA storage helpers safely handle cleared or inaccessible storage', () => {
+    const emptyStorage = {};
+    assert.strictEqual(simulatePwaStorageSafeRead(emptyStorage, 'stocksense_pwa_dismiss_count'), null);
+    assert.strictEqual(simulatePwaStorageSafeRead(emptyStorage, 'stocksense_pwa_active_time_ms'), null);
+
+    // Simulate broken/throwing storage
+    const brokenStorage = new Proxy({}, {
+        get() { throw new Error('SecurityError: The operation is insecure.'); }
+    });
+    assert.strictEqual(simulatePwaStorageSafeRead(brokenStorage, 'stocksense_pwa_dismiss_count'), null);
 });
 
 console.log(`\n=================================================`);

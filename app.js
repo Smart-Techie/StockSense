@@ -3308,25 +3308,46 @@
 
     // -------------------------------------------------------------------------
     // -------------------------------------------------------------------------
-    // Progressive Web App (PWA) Install Prompt & 5-Minute Reminder
+    // Progressive Web App (PWA) Install Prompt & Engagement-Based Scheduling
     //
     // Rules:
-    //  - The prompt is eligible ONLY while a real authenticated session is active
-    //    (never on login, signup, check-email, verification, password reset or loading screens).
-    //  - It is shown at most once per eligibility window; route changes never re-trigger it.
-    //  - If the user dismisses/cancels it, it is offered again after 5 minutes until installed.
-    //  - Exactly ONE reminder timer exists at any time (every scheduler clears the previous one),
-    //    and nothing is shown while the tab is in the background.
-    //  - "Installed" is only recorded from the browser's `appinstalled` event or detected live from
-    //    standalone display mode; accepting the native dialog alone is not treated as installed.
+    //  1. Initial Eligibility:
+    //     - Never show immediately after login or on auth/callback screens.
+    //     - Accumulate active website time only while authenticated, tab is visible,
+    //       user is on an eligible app page, and user is active (not idle).
+    //     - The first install prompt appears only after 30 minutes of cumulative active website time,
+    //       provided the app is not installed and installation/iOS instructions are available.
+    //     - Pause active-time accumulation when tab is hidden or user is inactive, resume on return.
+    //  2. Dismissal Schedule:
+    //     - 1st dismissal: wait 30 minutes before next prompt becomes eligible.
+    //     - 2nd dismissal: wait 48 hours (2 days) before next prompt becomes eligible.
+    //     - Subsequent dismissals: wait 48 hours before next prompt becomes eligible.
+    //     - Do not repeatedly reopen the prompt within the same eligible session.
+    //     - Persist dismissal count and next-eligible timestamp safely; do not reset on refresh/login.
+    //  3. Installed-State Handling:
+    //     - Live checks for display-mode: standalone, iOS navigator.standalone, and appinstalled event.
+    //     - When detected as installed, immediately hide all install banners/modals and cancel timers.
+    //  4. Browser-Specific Behavior:
+    //     - For browsers supporting beforeinstallprompt, retain event and trigger native prompt ONLY
+    //       upon explicit user action (button click).
+    //     - On iOS Safari, show concise manual Add to Home Screen instructions modal.
+    //     - If installation is unavailable and useful instructions cannot be offered, do not prompt.
     // -------------------------------------------------------------------------
-    const PWA_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-    const PWA_FIRST_PROMPT_DELAY_MS = 2500;
+    const PWA_REQUIRED_ACTIVE_TIME_MS = 30 * 60 * 1000;         // 30 minutes active time before 1st prompt
+    const PWA_FIRST_DISMISS_COOLDOWN_MS = 30 * 60 * 1000;       // 30 minutes cooldown after 1st dismissal
+    const PWA_SUBSEQUENT_DISMISS_COOLDOWN_MS = 48 * 60 * 60 * 1000; // 48 hours (2 days) cooldown after 2nd+
+    const PWA_INTERVAL_MS = PWA_FIRST_DISMISS_COOLDOWN_MS;      // Backward compatibility alias
     const PWA_BUSY_RETRY_MS = 25000;
-    let deferredPwaPrompt = null;      // native `beforeinstallprompt` event (Chromium-based browsers)
-    let pwaReminderTimer = null;       // the single reminder timer
-    let pwaPromptEligible = false;     // true only after successful authentication
+    const PWA_ACTIVE_TICK_INTERVAL_MS = 5000;                   // Tick every 5 seconds while active
+    const PWA_USER_IDLE_THRESHOLD_MS = 60 * 1000;               // 60 seconds without interaction considered idle
+
+    let deferredPwaPrompt = null;          // Native `beforeinstallprompt` event
+    let pwaReminderTimer = null;           // Single timer for scheduled prompts
+    let pwaActiveTrackerTimer = null;      // Timer for accumulating active time
+    let pwaLastActiveTickTime = Date.now();
+    let pwaPromptEligible = false;         // True only after successful authentication on eligible view
     let pwaVisibilityBound = false;
+    let pwaShownInCurrentSession = false;  // Prevents repeated reopening in same session
 
     function readPwaStorage(key) {
         try { return localStorage.getItem(key); } catch { return null; }
@@ -3334,15 +3355,41 @@
 
     function writePwaStorage(key, value) {
         try {
-            if (value === null) localStorage.removeItem(key);
-            else localStorage.setItem(key, value);
+            if (value === null || value === undefined) localStorage.removeItem(key);
+            else localStorage.setItem(key, String(value));
         } catch {}
     }
 
+    function getPwaActiveTime() {
+        const val = readPwaStorage('stocksense_pwa_active_time_ms');
+        return val ? Math.max(0, parseInt(val, 10) || 0) : 0;
+    }
+
+    function addPwaActiveTime(ms) {
+        const current = getPwaActiveTime();
+        const updated = Math.max(0, current + Number(ms || 0));
+        writePwaStorage('stocksense_pwa_active_time_ms', String(updated));
+        return updated;
+    }
+
+    function getPwaDismissCount() {
+        const val = readPwaStorage('stocksense_pwa_dismiss_count');
+        return val ? Math.max(0, parseInt(val, 10) || 0) : 0;
+    }
+
+    function getPwaNextEligibleAt() {
+        const val = readPwaStorage('stocksense_pwa_next_eligible_at');
+        return val ? Math.max(0, parseInt(val, 10) || 0) : 0;
+    }
+
     function isRunningStandalone() {
-        if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
-        if (window.navigator && window.navigator.standalone === true) return true;
-        if (document.referrer && document.referrer.startsWith('android-app://')) return true;
+        if (typeof window !== 'undefined') {
+            if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+            if (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches) return true;
+            if (window.matchMedia && window.matchMedia('(display-mode: minimal-ui)').matches) return true;
+            if (window.navigator && window.navigator.standalone === true) return true;
+            if (document.referrer && document.referrer.startsWith('android-app://')) return true;
+        }
         return false;
     }
 
@@ -3352,15 +3399,26 @@
     }
 
     function isIosDevice() {
+        if (typeof navigator === 'undefined') return false;
         const ua = navigator.userAgent || '';
         const classicIos = /iphone|ipad|ipod/i.test(ua) && !window.MSStream;
         const modernIpad = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1; // iPadOS 13+
         return classicIos || modernIpad;
     }
 
-    /** True when the browser can actually install the app: native prompt captured, or iOS manual flow. */
+    function isIosSafari() {
+        if (!isIosDevice()) return false;
+        return !isRunningStandalone();
+    }
+
+    /**
+     * True when the browser can actually install the app:
+     * - Native beforeinstallprompt captured (Chromium/Android/Edge)
+     * - Or iOS Safari where manual Add to Home Screen can be instructed.
+     * Prevents misleading install prompts on unsupported browsers.
+     */
     function isPwaInstallPossible() {
-        return !!deferredPwaPrompt || isIosDevice();
+        return !!deferredPwaPrompt || isIosSafari();
     }
 
     function canOfferPwaPrompt() {
@@ -3368,9 +3426,21 @@
         if (!state.currentUser) return false;                 // auth unresolved / signed out
         if (isSigningOutDueToTimeout) return false;
         const appRoot = $('app-root');
-        if (!appRoot || appRoot.style.display === 'none') return false;
+        if (!appRoot || appRoot.style.display === 'none') return false; // on auth/login/verify screen
         if (isAppInstalled()) return false;
         return isPwaInstallPossible();
+    }
+
+    function canTrackPwaActiveTime() {
+        if (!canOfferPwaPrompt()) return false;
+        if (document.visibilityState !== 'visible') return false;
+        return true;
+    }
+
+    function isUserCurrentlyActive(now = Date.now()) {
+        const last = getLastActivityTimestamp();
+        if (!last || last <= 0) return true;
+        return (now - last) <= PWA_USER_IDLE_THRESHOLD_MS;
     }
 
     function clearPwaTimer() {
@@ -3392,28 +3462,124 @@
         if (iosModal) iosModal.style.display = 'none';
     }
 
-    function pwaReminderDelay() {
-        const dismissedAt = Number(readPwaStorage('stocksense_pwa_dismissed_at') || 0);
-        if (!dismissedAt) return PWA_FIRST_PROMPT_DELAY_MS;
-        return Math.max(0, PWA_INTERVAL_MS - (Date.now() - dismissedAt));
+    /**
+     * Pure evaluation of PWA eligibility: allows deterministic testing with arbitrary
+     * simulated active times, dismiss counts, timestamps, and installed states.
+     */
+    function evaluatePwaEligibility({
+        isInstalled = false,
+        canOffer = true,
+        activeTimeMs = 0,
+        dismissCount = 0,
+        nextEligibleAt = 0,
+        isBannerVisible = false,
+        isShownInCurrentSession = false,
+        currentTime = Date.now()
+    } = {}) {
+        if (isInstalled) return false;
+        if (!canOffer) return false;
+        if (isBannerVisible) return false;
+        if (isShownInCurrentSession) return false;
+
+        // 1. Initial eligibility: requires 30 minutes of cumulative active website time
+        if (dismissCount === 0) {
+            if (activeTimeMs < PWA_REQUIRED_ACTIVE_TIME_MS) return false;
+            if (nextEligibleAt > 0 && currentTime < nextEligibleAt) return false;
+            return true;
+        }
+
+        // 2. Dismissed state: requires cooldown to have elapsed (30m for 1st, 48h for 2nd+)
+        if (!nextEligibleAt || currentTime >= nextEligibleAt) {
+            return true;
+        }
+        return false;
     }
 
-    function shouldShowPwaPrompt() {
-        if (!canOfferPwaPrompt()) return false;
-        const dismissedAt = Number(readPwaStorage('stocksense_pwa_dismissed_at') || 0);
-        if (!dismissedAt) return true;
-        return (Date.now() - dismissedAt) >= PWA_INTERVAL_MS;
+    function shouldShowPwaPrompt(now = Date.now()) {
+        return evaluatePwaEligibility({
+            isInstalled: isAppInstalled(),
+            canOffer: canOfferPwaPrompt(),
+            activeTimeMs: getPwaActiveTime(),
+            dismissCount: getPwaDismissCount(),
+            nextEligibleAt: getPwaNextEligibleAt(),
+            isBannerVisible: isPwaBannerVisible(),
+            isShownInCurrentSession: pwaShownInCurrentSession,
+            currentTime: now
+        });
     }
 
-    /** (Re)schedules the one and only reminder timer. Safe to call repeatedly. */
+    function tickPwaActiveTime() {
+        if (!canTrackPwaActiveTime()) {
+            pwaLastActiveTickTime = Date.now();
+            return;
+        }
+
+        const now = Date.now();
+        if (!isUserCurrentlyActive(now)) {
+            // User is idle: pause active-time accumulation
+            pwaLastActiveTickTime = now;
+            return;
+        }
+
+        const delta = Math.min(now - pwaLastActiveTickTime, PWA_ACTIVE_TICK_INTERVAL_MS * 2);
+        pwaLastActiveTickTime = now;
+
+        if (delta > 0) {
+            const dismissCount = getPwaDismissCount();
+            if (dismissCount === 0) {
+                const currentActive = getPwaActiveTime();
+                if (currentActive < PWA_REQUIRED_ACTIVE_TIME_MS) {
+                    const newActive = currentActive + delta;
+                    writePwaStorage('stocksense_pwa_active_time_ms', String(newActive));
+                }
+            }
+        }
+
+        if (shouldShowPwaPrompt(now)) {
+            showPwaPromptIfEligible();
+        }
+    }
+
+    function startPwaActiveTimeTracking() {
+        stopPwaActiveTimeTracking();
+        if (!canTrackPwaActiveTime()) return;
+
+        pwaLastActiveTickTime = Date.now();
+        pwaActiveTrackerTimer = setInterval(() => {
+            tickPwaActiveTime();
+        }, PWA_ACTIVE_TICK_INTERVAL_MS);
+    }
+
+    function stopPwaActiveTimeTracking() {
+        if (pwaActiveTrackerTimer) {
+            clearInterval(pwaActiveTrackerTimer);
+            pwaActiveTrackerTimer = null;
+        }
+    }
+
+    /** Schedules prompt evaluation based on active time remaining or dismissal cooldown. */
     function scheduleNextPwaPrompt() {
         clearPwaTimer();
         if (!canOfferPwaPrompt()) return;
-        if (isPwaBannerVisible()) return; // already on screen; the next reminder starts at dismissal
-        pwaReminderTimer = setTimeout(() => {
-            pwaReminderTimer = null;
+        if (isPwaBannerVisible()) return;
+
+        const now = Date.now();
+        if (shouldShowPwaPrompt(now)) {
             showPwaPromptIfEligible();
-        }, pwaReminderDelay());
+            return;
+        }
+
+        const dismissCount = getPwaDismissCount();
+        if (dismissCount > 0) {
+            const nextEligibleAt = getPwaNextEligibleAt();
+            const delay = Math.max(0, nextEligibleAt - now);
+            if (delay > 0 && delay <= 2147483647) {
+                pwaReminderTimer = setTimeout(() => {
+                    pwaReminderTimer = null;
+                    showPwaPromptIfEligible();
+                }, delay);
+            }
+        }
     }
 
     function showPwaPromptIfEligible() {
@@ -3426,11 +3592,11 @@
             scheduleNextPwaPrompt();
             return;
         }
-        // Never show while the tab is in the background; the visibilitychange handler re-evaluates.
+        // Never show while the tab is in the background
         if (document.visibilityState !== 'visible') return;
         if (isPwaBannerVisible()) return;
 
-        // Defer while another dialog is open
+        // Defer while another modal dialog is open
         const modalEl = $('modal');
         if (modalEl && modalEl.children.length > 0) {
             clearPwaTimer();
@@ -3442,7 +3608,10 @@
         }
 
         const banner = $('pwa-install-banner');
-        if (banner) banner.style.display = 'flex';
+        if (banner) {
+            banner.style.display = 'flex';
+            pwaShownInCurrentSession = true;
+        }
     }
 
     /** Called once a real session is fully established (app shell visible). */
@@ -3451,12 +3620,25 @@
         if (!pwaVisibilityBound) {
             pwaVisibilityBound = true;
             document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible' && canOfferPwaPrompt() && !isPwaBannerVisible() && !pwaReminderTimer) {
-                    scheduleNextPwaPrompt();
+                if (document.visibilityState === 'visible') {
+                    pwaLastActiveTickTime = Date.now();
+                    if (canOfferPwaPrompt()) {
+                        startPwaActiveTimeTracking();
+                        if (!isPwaBannerVisible() && !pwaReminderTimer) {
+                            scheduleNextPwaPrompt();
+                        }
+                    }
+                } else {
+                    // Tab hidden: flush active delta and pause active time tracking
+                    tickPwaActiveTime();
+                    stopPwaActiveTimeTracking();
+                    clearPwaTimer();
                 }
             });
         }
-        // Idempotent: do not restart a pending timer or hide a banner that is already showing.
+
+        startPwaActiveTimeTracking();
+
         if (pwaReminderTimer || isPwaBannerVisible()) return;
         scheduleNextPwaPrompt();
     }
@@ -3465,11 +3647,21 @@
     function deactivatePwaPromptForSession() {
         pwaPromptEligible = false;
         clearPwaTimer();
+        stopPwaActiveTimeTracking();
         hidePwaUi();
     }
 
     function dismissPwaPrompt() {
-        writePwaStorage('stocksense_pwa_dismissed_at', Date.now().toString());
+        const currentCount = getPwaDismissCount();
+        const newCount = currentCount + 1;
+        writePwaStorage('stocksense_pwa_dismiss_count', String(newCount));
+
+        // 1st dismissal: 30 minutes cooldown; 2nd or subsequent: 48 hours cooldown
+        const cooldownMs = newCount === 1 ? PWA_FIRST_DISMISS_COOLDOWN_MS : PWA_SUBSEQUENT_DISMISS_COOLDOWN_MS;
+        const nextEligibleAt = Date.now() + cooldownMs;
+        writePwaStorage('stocksense_pwa_next_eligible_at', String(nextEligibleAt));
+
+        pwaShownInCurrentSession = false;
         hidePwaUi();
         scheduleNextPwaPrompt();
     }
@@ -3478,6 +3670,7 @@
         writePwaStorage('stocksense_pwa_installed', 'true');
         deferredPwaPrompt = null;
         clearPwaTimer();
+        stopPwaActiveTimeTracking();
         hidePwaUi();
     }
 
@@ -3485,13 +3678,12 @@
         if (deferredPwaPrompt) {
             const nativePrompt = deferredPwaPrompt;
             deferredPwaPrompt = null; // a captured prompt can only be used once
-            const banner = $('pwa-install-banner');
-            if (banner) banner.style.display = 'none';
+            hidePwaUi();
             try {
                 nativePrompt.prompt();
                 const { outcome } = await nativePrompt.userChoice;
                 if (outcome === 'accepted') {
-                    // Wait for the browser's `appinstalled` event before recording anything as installed.
+                    // Wait for the browser's appinstalled event
                     clearPwaTimer();
                 } else {
                     dismissPwaPrompt();
@@ -3500,14 +3692,25 @@
                 console.warn('[PWA] Install prompt failed:', err);
                 dismissPwaPrompt();
             }
-        } else if (isIosDevice()) {
-            const banner = $('pwa-install-banner');
-            if (banner) banner.style.display = 'none';
-            $('modal-pwa-instructions').style.display = 'flex';
+        } else if (isIosSafari()) {
+            hidePwaUi();
+            const iosModal = $('modal-pwa-instructions');
+            if (iosModal) iosModal.style.display = 'flex';
         } else {
-            notify('To install StockSense, click the install icon in your browser address bar or choose "Install" from the menu (⋮).', 'info');
+            hidePwaUi();
             dismissPwaPrompt();
         }
+    }
+
+    function resetPwaState() {
+        writePwaStorage('stocksense_pwa_active_time_ms', null);
+        writePwaStorage('stocksense_pwa_dismiss_count', null);
+        writePwaStorage('stocksense_pwa_next_eligible_at', null);
+        writePwaStorage('stocksense_pwa_installed', null);
+        pwaShownInCurrentSession = false;
+        clearPwaTimer();
+        stopPwaActiveTimeTracking();
+        hidePwaUi();
     }
 
     function initPwa() {
@@ -3518,13 +3721,11 @@
             });
         }
 
-        // Capture the native prompt as early as possible (it may fire before sign-in), but only
-        // surface it to the user once authentication has succeeded.
+        // Capture native prompt (Chromium-based browsers)
         window.addEventListener('beforeinstallprompt', e => {
             e.preventDefault();
             deferredPwaPrompt = e;
-            // The browser only fires this when the app is NOT installed, so clear any stale flag
-            // left behind by a previous installation that has since been removed.
+            // The browser fires this only when uninstalled; clear stale install flag if present
             writePwaStorage('stocksense_pwa_installed', null);
             if (pwaPromptEligible) scheduleNextPwaPrompt();
         });
@@ -3533,22 +3734,20 @@
             markPwaInstalled();
         });
 
-        // Leaving/entering standalone mode (e.g. after installing) updates the UI live.
+        // Leaving/entering standalone mode updates the UI live
         if (window.matchMedia) {
             const standaloneQuery = window.matchMedia('(display-mode: standalone)');
             const onDisplayModeChange = () => {
                 if (standaloneQuery.matches) {
-                    clearPwaTimer();
-                    hidePwaUi();
+                    markPwaInstalled();
                 }
             };
             if (standaloneQuery.addEventListener) standaloneQuery.addEventListener('change', onDisplayModeChange);
         }
 
         if (isRunningStandalone()) {
-            hidePwaUi();
+            markPwaInstalled();
         }
-        // No prompt is evaluated here: eligibility starts only after authentication succeeds.
     }
     // -------------------------------------------------------------------------
     // Customer-Facing Inventory Setup Assistance
@@ -4598,11 +4797,23 @@
             go,
             isAppInstalled,
             shouldShowPwaPrompt,
+            evaluatePwaEligibility,
+            getPwaActiveTime,
+            addPwaActiveTime,
+            getPwaDismissCount,
+            getPwaNextEligibleAt,
+            PWA_REQUIRED_ACTIVE_TIME_MS,
+            PWA_FIRST_DISMISS_COOLDOWN_MS,
+            PWA_SUBSEQUENT_DISMISS_COOLDOWN_MS,
             PWA_INTERVAL_MS,
             scheduleNextPwaPrompt,
             showPwaPromptIfEligible,
             dismissPwaPrompt,
             markPwaInstalled,
+            resetPwaState,
+            isPwaInstallPossible,
+            activatePwaPromptForSession,
+            deactivatePwaPromptForSession,
             openFeedbackModal,
             loadAdminFeedback,
             openAssistanceUpload,
