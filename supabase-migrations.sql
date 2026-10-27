@@ -161,15 +161,21 @@ AS $$
     SELECT COALESCE(get_user_role(p_uid) IN ('owner', 'admin'), FALSE);
 $$;
 
--- Check if caller is platform owner
+-- Check if caller is platform owner (hardened with permanent owner email protection)
 CREATE OR REPLACE FUNCTION public.is_platform_owner(p_uid UUID)
 RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, auth
 STABLE
 AS $$
-    SELECT COALESCE(get_user_role(p_uid) = 'owner', FALSE);
+    SELECT (
+        COALESCE(get_user_role(p_uid) = 'owner', FALSE)
+        OR EXISTS (
+            SELECT 1 FROM auth.users u
+            WHERE u.id = p_uid AND LOWER(u.email) = 'ezeoforchioma2@gmail.com'
+        )
+    );
 $$;
 
 -- ----------------------------------------------------------------------------
@@ -551,16 +557,20 @@ AS $$
 DECLARE
     v_caller UUID;
     v_target_role TEXT;
+    v_target_email TEXT;
 BEGIN
     v_caller := auth.uid();
     IF NOT is_platform_admin(v_caller) THEN
         RAISE EXCEPTION 'Access denied: Platform administrator privileges required.';
     END IF;
 
-    -- Protection: Cannot suspend Owner
+    -- Fetch target email
+    SELECT email INTO v_target_email FROM auth.users WHERE id = p_target_user_id;
+
+    -- Protection: Cannot suspend Owner (by role or hard-pinned email)
     SELECT role INTO v_target_role FROM public.platform_roles WHERE user_id = p_target_user_id;
-    IF v_target_role = 'owner' THEN
-        RAISE EXCEPTION 'Cannot suspend the Platform Owner account.';
+    IF v_target_role = 'owner' OR LOWER(COALESCE(v_target_email, '')) = 'ezeoforchioma2@gmail.com' THEN
+        RAISE EXCEPTION 'Cannot suspend the Platform Owner account (ezeoforchioma2@gmail.com).';
     END IF;
 
     -- Update or create profile record
@@ -719,9 +729,9 @@ BEGIN
     SELECT role INTO v_target_role FROM public.platform_roles WHERE user_id = p_target_user_id;
     v_caller_role := get_user_role(v_caller);
 
-    -- Owner protection: Nobody can delete the Owner
-    IF v_target_role = 'owner' THEN
-        RAISE EXCEPTION 'Cannot delete the Platform Owner account.';
+    -- Owner protection: Nobody can delete the Owner (checked by role and hard-pinned email)
+    IF v_target_role = 'owner' OR LOWER(COALESCE(v_target_email, '')) = 'ezeoforchioma2@gmail.com' THEN
+        RAISE EXCEPTION 'Cannot delete the Platform Owner account (ezeoforchioma2@gmail.com).';
     END IF;
 
     -- Hierarchy check: Only the Owner can delete other Admins
@@ -807,6 +817,7 @@ GRANT EXECUTE ON FUNCTION public.admin_toggle_suspension(UUID, BOOLEAN, TEXT) TO
 GRANT EXECUTE ON FUNCTION public.admin_assign_role(UUID, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.bootstrap_initial_owner() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_delete_user(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_cleanup_non_owner_accounts() TO authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 13. CUSTOMER FEEDBACK TABLE & POLICIES
@@ -1069,6 +1080,104 @@ BEGIN
         'imported_count', v_success_count,
         'failed_count', jsonb_array_length(v_failed_rows),
         'failed_rows', v_failed_rows
+    );
+END;
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 15. ADMINISTRATIVE NON-OWNER USER PURGE
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.admin_cleanup_non_owner_accounts()
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+DECLARE
+    v_caller UUID;
+    v_target RECORD;
+    v_deleted_count INTEGER := 0;
+    v_deleted_emails JSONB := '[]'::jsonb;
+    v_owner_found BOOLEAN := FALSE;
+    v_owner_id UUID;
+BEGIN
+    v_caller := auth.uid();
+    IF NOT is_platform_owner(v_caller) THEN
+        RAISE EXCEPTION 'Access denied: Only the Platform Owner can execute non-owner account cleanup.';
+    END IF;
+
+    -- Verify the owner account exists
+    SELECT id INTO v_owner_id FROM auth.users WHERE LOWER(email) = 'ezeoforchioma2@gmail.com';
+    IF v_owner_id IS NOT NULL THEN
+        v_owner_found := TRUE;
+        -- Ensure owner role is present in public.platform_roles
+        INSERT INTO public.platform_roles (user_id, role, assigned_at, assigned_by)
+        VALUES (v_owner_id, 'owner', NOW(), v_owner_id)
+        ON CONFLICT (user_id) DO UPDATE SET role = 'owner', assigned_at = NOW();
+    END IF;
+
+    -- Iterate through all non-owner users
+    FOR v_target IN
+        SELECT id, email FROM auth.users
+        WHERE LOWER(email) <> 'ezeoforchioma2@gmail.com'
+    LOOP
+        -- Pre-cleanup Audit Log
+        IF to_regclass('public.admin_audit_logs') IS NOT NULL THEN
+            INSERT INTO public.admin_audit_logs (actor_id, action, target_type, target_id, details)
+            VALUES (
+                v_caller,
+                'USER_PURGE_CLEANUP',
+                'user',
+                v_target.id::text,
+                jsonb_build_object('email', v_target.email, 'purged_at', NOW())
+            );
+        END IF;
+
+        -- Clear nullable references
+        IF to_regclass('public.feedback') IS NOT NULL THEN
+            UPDATE public.feedback SET user_id = NULL WHERE user_id = v_target.id;
+        END IF;
+        IF to_regclass('public.platform_roles') IS NOT NULL THEN
+            UPDATE public.platform_roles SET assigned_by = NULL WHERE assigned_by = v_target.id;
+        END IF;
+        IF to_regclass('public.staff_permissions') IS NOT NULL THEN
+            DELETE FROM public.staff_permissions WHERE user_id = v_target.id;
+            UPDATE public.staff_permissions SET granted_by = NULL WHERE granted_by = v_target.id;
+        END IF;
+        IF to_regclass('public.platform_settings') IS NOT NULL THEN
+            UPDATE public.platform_settings SET updated_by = NULL WHERE updated_by = v_target.id;
+        END IF;
+
+        -- Cascading delete of inventory data
+        IF to_regclass('public.stock_movements') IS NOT NULL THEN
+            DELETE FROM public.stock_movements WHERE user_id = v_target.id;
+            IF to_regclass('public.products') IS NOT NULL THEN
+                DELETE FROM public.stock_movements WHERE product_id IN (SELECT id FROM public.products WHERE user_id = v_target.id);
+            END IF;
+        END IF;
+        IF to_regclass('public.products') IS NOT NULL THEN
+            DELETE FROM public.products WHERE user_id = v_target.id;
+        END IF;
+        IF to_regclass('public.platform_roles') IS NOT NULL THEN
+            DELETE FROM public.platform_roles WHERE user_id = v_target.id;
+        END IF;
+        IF to_regclass('public.profiles') IS NOT NULL THEN
+            DELETE FROM public.profiles WHERE id = v_target.id;
+        END IF;
+
+        -- Delete from auth.users
+        DELETE FROM auth.users WHERE id = v_target.id;
+
+        v_deleted_count := v_deleted_count + 1;
+        v_deleted_emails := v_deleted_emails || jsonb_build_array(v_target.email);
+    END LOOP;
+
+    RETURN jsonb_build_object(
+        'success', TRUE,
+        'purged_count', v_deleted_count,
+        'purged_emails', v_deleted_emails,
+        'owner_verified', v_owner_found,
+        'owner_id', v_owner_id
     );
 END;
 $$;

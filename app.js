@@ -232,6 +232,19 @@
         return 'https://stocksense-psi.vercel.app/auth/verify';
     }
 
+    /**
+     * Dev-preview mock mode (localhost only, via ?preview=owner|admin|moderator|member).
+     * It never talks to the backend, so it must never be available on a deployed host.
+     */
+    function isPreviewMode() {
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        return !!(isLocalhost && new URLSearchParams(window.location.search).get('preview'));
+    }
+
+    /**
+     * Preview-mode only: remembers which MOCK users were "deleted" in the simulated admin list.
+     * These helpers are never used against real Supabase data.
+     */
     function getDeletedUserIds() {
         try {
             return JSON.parse(localStorage.getItem('stocksense_deleted_user_ids') || '[]');
@@ -251,14 +264,28 @@
         } catch {}
     }
 
+    /**
+     * Convert a Supabase/Postgres error into a safe, user-facing message.
+     * Messages raised deliberately by our SQL functions use SQLSTATE P0001 and are safe to show;
+     * anything else (constraint names, internal errors) is logged and replaced by a generic text.
+     */
+    function friendlyAdminError(err, fallback) {
+        if (err && err.code === 'P0001' && err.message) return err.message;
+        if (err && (err.code === '42883' || err.code === 'PGRST202')) {
+            return 'This administrative action is not available on the server yet. Apply the latest database migration and try again.';
+        }
+        console.error('Administrative operation failed:', err);
+        return fallback;
+    }
+
     async function initSession() {
         showAuthScreen('loading');
 
-        // Check for dev preview parameter on localhost / 127.0.0.1 / Vercel preview
+        // Check for dev preview parameter (localhost / 127.0.0.1 only)
         const urlParams = new URLSearchParams(window.location.search);
         const previewRole = urlParams.get('preview');
         const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const isPreviewAllowed = isLocalhost || window.location.hostname.endsWith('vercel.app') || window.location.hostname === 'stocksense-psi.vercel.app';
+        const isPreviewAllowed = isLocalhost;
 
         if (isPreviewAllowed && previewRole) {
             recordUserActivity();
@@ -340,6 +367,7 @@
             render();
             recommend();
             notify(`Dev Mode: Loaded as ${previewRole.toUpperCase()}. All features active.`, 'info');
+            activatePwaPromptForSession();
             return;
         }
 
@@ -495,6 +523,9 @@
         } else {
             go('dashboard');
         }
+
+        // Authentication fully resolved and the app is visible: the install prompt may now be offered.
+        activatePwaPromptForSession();
     }
 
     async function fetchOrCreateProfile(user) {
@@ -615,6 +646,10 @@
     // Auth UI View Rendering
     // -------------------------------------------------------------------------
     function showAuthScreen(view, message = '', messageType = 'error') {
+        // Any unauthenticated / transitional screen (login, signup, verify, reset, loading)
+        // must never show the install prompt.
+        deactivatePwaPromptForSession();
+
         $('auth-screen').style.display = 'flex';
         $('app-root').style.display = 'none';
 
@@ -2272,19 +2307,36 @@
         }
     }
 
+    /**
+     * Which user-management actions the signed-in administrator may see for a target row.
+     * The UI mirrors, but never replaces, the server-side rules enforced inside the
+     * admin_toggle_suspension / admin_delete_user / admin_assign_role SQL functions.
+     */
+    function getAdminUserActions(u) {
+        const targetRole = u.role || 'member';
+        const targetIsOwner = targetRole === 'owner';
+        const targetIsSelf = u.id === state.currentUser?.id;
+        const callerIsOwner = state.currentRole === 'owner';
+        const callerIsStaffAdmin = callerIsOwner || state.currentRole === 'admin';
+        // Admins may manage ordinary members and moderators; only the Owner may act on Administrators.
+        const mayActOnTarget = callerIsStaffAdmin && !targetIsOwner && !targetIsSelf &&
+            (callerIsOwner || targetRole !== 'admin');
+        return {
+            canSuspend: mayActOnTarget,
+            canDelete: mayActOnTarget,
+            canSetRole: callerIsOwner && !targetIsOwner && !targetIsSelf,
+            protectedReason: targetIsOwner ? 'Platform Owner is protected' : (targetIsSelf ? 'This is your account' : '')
+        };
+    }
+
     async function loadAdminUsers() {
         const search = ($('admin-user-search')?.value || '').trim();
         const role = $('admin-user-role-filter')?.value || 'all';
         const status = $('admin-user-status-filter')?.value || 'all';
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const previewRole = urlParams.get('preview');
-        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const isPreview = (isLocalhost || window.location.hostname.endsWith('vercel.app') || window.location.hostname === 'stocksense-psi.vercel.app') && previewRole;
-
-        const deletedIds = getDeletedUserIds();
-
-        if (isPreview && state.adminUsers) {
+        if (isPreviewMode() && state.adminUsers) {
+            // Dev preview (localhost only): filter the simulated user list in memory.
+            const deletedIds = getDeletedUserIds();
             let filtered = state.adminUsers.filter(u => !deletedIds.includes(u.id));
             if (search) {
                 const s = search.toLowerCase();
@@ -2301,7 +2353,7 @@
         }
 
         try {
-            // Try calling admin_get_users RPC
+            // The server is the single source of truth: list straight from auth.users via the RPC.
             const { data, error } = await supabase.rpc('admin_get_users', {
                 p_search: search,
                 p_role: role,
@@ -2310,99 +2362,103 @@
                 p_offset: state.adminUserOffset
             });
 
-            if (!error && data) {
-                const rawUsers = data.users || [];
-                state.adminUsers = rawUsers.filter(u => !deletedIds.includes(u.id));
-                const excludedCount = deletedIds.filter(id => rawUsers.some(u => u.id === id)).length;
-                state.adminTotalUsers = Math.max(0, (data.total || 0) - excludedCount);
-                renderAdminUsersTable();
-                return;
+            if (error) throw error;
+
+            state.adminUsers = (data && data.users) || [];
+            state.adminTotalUsers = Number((data && data.total) || 0);
+
+            // If the last user on a later page was removed, step back to the previous page.
+            if (!state.adminUsers.length && state.adminUserOffset > 0 && state.adminTotalUsers > 0) {
+                state.adminUserOffset = Math.max(0, state.adminUserOffset - state.adminUserLimit);
+                return loadAdminUsers();
             }
-        } catch (rpcErr) {
-            console.warn('admin_get_users RPC failed, falling back to profiles table:', rpcErr);
-        }
-
-        // Fallback: query profiles directly
-        let query = supabase.from('profiles').select('*, platform_roles(role)');
-        if (status === 'active') query = query.eq('is_suspended', false);
-        if (status === 'suspended') query = query.eq('is_suspended', true);
-
-        const { data: profiles, error } = await query;
-        if (!error && profiles) {
-            state.adminUsers = profiles
-                .filter(p => !deletedIds.includes(p.id))
-                .map(p => ({
-                    id: p.id,
-                    email: p.id === state.currentUser.id ? state.currentUser.email : `user_${p.id.substring(0, 6)}@client`,
-                    full_name: p.full_name,
-                    is_suspended: p.is_suspended,
-                    suspension_reason: p.suspension_reason,
-                    role: p.platform_roles?.[0]?.role || null,
-                    created_at: p.created_at,
-                    last_sign_in_at: p.updated_at
-                }));
-            state.adminTotalUsers = state.adminUsers.length;
             renderAdminUsersTable();
+        } catch (err) {
+            // Never fabricate rows from a partial source: show the failure instead.
+            state.adminUsers = [];
+            state.adminTotalUsers = 0;
+            renderAdminUsersTable([], friendlyAdminError(err, 'Could not load user accounts from the server. Please try again.'));
         }
     }
 
-    function renderAdminUsersTable(userList = state.adminUsers) {
+    function renderAdminUsersTable(userList = state.adminUsers, errorMessage = '') {
         const tbody = $('admin-users-table');
         if (!tbody) return;
 
         const users = userList || [];
+        const pageSpan = $('admin-users-pagination-info');
+        const pageControls = $('admin-users-pagination-controls');
+
+        if (errorMessage) {
+            tbody.innerHTML = `<tr><td colspan="7" class="empty error-state">${esc(errorMessage)}</td></tr>`;
+            if (pageSpan) pageSpan.textContent = 'Users could not be loaded';
+            if (pageControls) pageControls.innerHTML = '';
+            return;
+        }
+
         if (!users.length) {
             tbody.innerHTML = '<tr><td colspan="7" class="empty">No matching users found.</td></tr>';
+            if (pageSpan) pageSpan.textContent = 'Showing 0 users';
+            if (pageControls) pageControls.innerHTML = '';
             return;
         }
 
         tbody.innerHTML = users.map(u => {
             const isSuspended = u.is_suspended;
             const role = u.role || 'member';
-            const isOwner = role === 'owner';
-            const isSelf = u.id === state.currentUser?.id;
-            const canDelete = !isOwner && !isSelf && (state.currentRole === 'owner' || role !== 'admin');
+            const actions = getAdminUserActions(u);
+            const uid = esc(u.id);
 
             return `
-                <tr>
-                    <td>
+                <tr data-user-row="${uid}">
+                    <td data-label="Name &amp; ID">
                         <b>${esc(u.full_name || 'Unnamed User')}</b>
-                        <div class="foot">${esc(u.id)}</div>
+                        <div class="foot user-id-cell">${uid}</div>
                     </td>
-                    <td>${esc(u.email || '—')}</td>
-                    <td><span class="role-badge ${role}">${role}</span></td>
-                    <td><span class="status ${isSuspended ? 'out' : 'ok'}">${isSuspended ? 'Suspended' : 'Active'}</span></td>
-                    <td>${datefmt(u.created_at)}</td>
-                    <td>${datefmt(u.last_sign_in_at)}</td>
-                    <td>
-                        <button class="smallbtn" data-admin-act="details" data-uid="${u.id}">Details</button>
-                        ${!isOwner && !isSelf ? `
-                            <button class="smallbtn ${isSuspended ? '' : 'del'}" data-admin-act="toggle-suspend" data-uid="${u.id}" data-suspended="${isSuspended}">
-                                ${isSuspended ? 'Reactivate' : 'Suspend'}
-                            </button>
-                        ` : ''}
-                        ${state.currentRole === 'owner' && !isSelf ? `
-                            <button class="smallbtn" data-admin-act="assign-role" data-uid="${u.id}" data-role="${role}">
-                                Set Role
-                            </button>
-                        ` : ''}
-                        ${canDelete ? `
-                            <button class="smallbtn del" data-admin-act="delete-user" data-uid="${u.id}" title="Permanently delete user account" style="background:#ef4444;border-color:#ef4444;color:#fff;font-weight:700">
-                                🗑 Delete
-                            </button>
-                        ` : ''}
+                    <td data-label="Email" class="cell-email">${esc(u.email || '—')}</td>
+                    <td data-label="Role"><span class="role-badge ${esc(role)}">${esc(role)}</span></td>
+                    <td data-label="Status"><span class="status ${isSuspended ? 'out' : 'ok'}">${isSuspended ? 'Suspended' : 'Active'}</span></td>
+                    <td data-label="Registered">${datefmt(u.created_at)}</td>
+                    <td data-label="Last active">${datefmt(u.last_sign_in_at)}</td>
+                    <td data-label="Actions" class="cell-actions">
+                        <div class="row-actions">
+                            <button class="smallbtn" data-admin-act="details" data-uid="${uid}">Details</button>
+                            ${actions.canSuspend ? `
+                                <button class="smallbtn ${isSuspended ? '' : 'del'}" data-admin-act="toggle-suspend" data-uid="${uid}" data-suspended="${isSuspended ? 'true' : 'false'}">
+                                    ${isSuspended ? 'Reactivate' : 'Suspend'}
+                                </button>
+                            ` : ''}
+                            ${actions.canSetRole ? `
+                                <button class="smallbtn" data-admin-act="assign-role" data-uid="${uid}" data-role="${esc(role)}">
+                                    Set Role
+                                </button>
+                            ` : ''}
+                            ${actions.canDelete ? `
+                                <button class="smallbtn danger-solid" data-admin-act="delete-user" data-uid="${uid}" title="Permanently delete user account">
+                                    🗑 Delete
+                                </button>
+                            ` : ''}
+                            ${actions.protectedReason ? `<span class="protected-note" title="${esc(actions.protectedReason)}">🔒 ${esc(actions.protectedReason)}</span>` : ''}
+                        </div>
                     </td>
                 </tr>
             `;
         }).join('');
 
-        // Update pagination text
-        const pageSpan = $('admin-users-pagination-info');
+        // Pagination summary and controls (server-side pagination in live mode)
+        const live = !isPreviewMode();
+        const total = live ? Math.max(state.adminTotalUsers, users.length) : users.length;
+        const offset = live ? state.adminUserOffset : 0;
+        const start = total > 0 ? offset + 1 : 0;
+        const end = live ? Math.min(offset + users.length, total) : users.length;
         if (pageSpan) {
-            const total = users.length;
-            const start = total > 0 ? state.adminUserOffset + 1 : 0;
-            const end = Math.min(state.adminUserOffset + state.adminUserLimit, total);
             pageSpan.textContent = `Showing ${start}-${end} of ${total} users`;
+        }
+        if (pageControls) {
+            pageControls.innerHTML = (live && total > state.adminUserLimit) ? `
+                <button class="btn secondary btn-sm" data-admin-page="prev" ${offset <= 0 ? 'disabled' : ''}>← Previous</button>
+                <button class="btn secondary btn-sm" data-admin-page="next" ${end >= total ? 'disabled' : ''}>Next →</button>
+            ` : '';
         }
     }
 
@@ -2411,9 +2467,7 @@
         if (!user) return;
 
         const role = user.role || 'member';
-        const isOwner = role === 'owner';
-        const isSelf = user.id === state.currentUser?.id;
-        const canDelete = !isOwner && !isSelf && (state.currentRole === 'owner' || role !== 'admin');
+        const canDelete = getAdminUserActions(user).canDelete;
 
         $('modal').innerHTML = `
             <div class="modalbg" id="modal-bg">
@@ -2490,9 +2544,11 @@
                             <label>Suspension Reason (documented in audit log) *</label>
                             <textarea class="field" id="suspend-reason" required rows="3" placeholder="e.g. Violation of terms, payment issue, requested hold"></textarea>
                         </div>
+                        <p class="muted" style="margin-bottom:14px">Suspending blocks this user from signing in, revokes their active sessions and removes access to their inventory data. Nothing is deleted, and you can reactivate the account at any time.</p>
                     ` : `
                         <p style="color:var(--green)">Reactivating this account will restore the user's access to their inventory.</p>
                     `}
+                    <div class="auth-notice error" id="suspend-modal-error" style="display:none;margin-bottom:14px;font-size:12.5px"></div>
                     <div class="actions">
                         <button type="button" class="btn secondary" id="modal-cancel">Cancel</button>
                         <button class="btn ${isCurrentlySuspended ? 'greenbtn' : 'dangerbtn'}" id="modal-submit">${actionWord} Account</button>
@@ -2508,19 +2564,34 @@
             e.preventDefault();
             const reason = isCurrentlySuspended ? null : $('suspend-reason').value.trim();
             const btn = $('modal-submit');
+            const cancelBtn = $('modal-cancel');
+            const errBox = $('suspend-modal-error');
             btn.disabled = true;
-            btn.textContent = 'Processing...';
+            if (cancelBtn) cancelBtn.disabled = true;
+            btn.textContent = isCurrentlySuspended ? 'Reactivating...' : 'Suspending...';
+            if (errBox) errBox.style.display = 'none';
 
             try {
-                // Enforce server-side authorization RPC
-                const { error } = await supabase.rpc('admin_toggle_suspension', {
+                if (isPreviewMode()) {
+                    // Dev preview (localhost only): simulate against the mock list, never the backend.
+                    user.is_suspended = !isCurrentlySuspended;
+                    user.suspension_reason = reason;
+                    closeModal();
+                    notify(`Preview only: user ${isCurrentlySuspended ? 'reactivated' : 'suspended'} in the simulated list (no real account changed).`, 'info');
+                    await loadAdminUsers();
+                    return;
+                }
+
+                // Server-side authorization, Owner protection and auth-level blocking all happen in the RPC.
+                const { data, error } = await supabase.rpc('admin_toggle_suspension', {
                     p_target_user_id: userId,
                     p_suspend: !isCurrentlySuspended,
                     p_reason: reason
                 });
 
-                if (error) {
-                    throw error;
+                if (error) throw error;
+                if (!data || data.success !== true || data.is_suspended !== !isCurrentlySuspended) {
+                    throw new Error('The server did not confirm the change.');
                 }
 
                 closeModal();
@@ -2528,8 +2599,14 @@
                 await loadAdminUsers();
             } catch (err) {
                 btn.disabled = false;
+                if (cancelBtn) cancelBtn.disabled = false;
                 btn.textContent = `${actionWord} Account`;
-                notify(err.message || 'Operation failed.', 'error');
+                const msg = friendlyAdminError(err, `Could not ${actionWord.toLowerCase()} this account. No changes were made.`);
+                if (errBox) {
+                    errBox.textContent = msg;
+                    errBox.style.display = 'block';
+                }
+                notify(msg, 'error');
             }
         };
     }
@@ -2570,7 +2647,7 @@
                     <div class="auth-notice error" style="margin-bottom:16px;line-height:1.5;font-size:12.5px">
                         <b>Warning:</b> You are about to permanently delete the account of <b style="color:#fff">${esc(displayName)}</b> (<code>${esc(user.email || user.id)}</code>).
                         <br><br>
-                        This will revoke authentication credentials, purge their profile, and remove their registered products and recorded stock movements. Historical audit logs will be preserved with actor references cleared. <b>This action is irreversible and cannot be undone.</b>
+                        This permanently removes their sign-in account, profile, role and staff permissions, registered products and recorded stock movements. Feedback they submitted is kept anonymously and administrative audit entries are preserved. <b>This action is irreversible and cannot be undone.</b>
                     </div>
 
                     <div class="auth-notice error" id="delete-user-modal-error" style="display:none;margin-bottom:14px;line-height:1.4;font-size:12.5px"></div>
@@ -2614,69 +2691,57 @@
             confirmInput.disabled = true;
             if (errBox) errBox.style.display = 'none';
 
-            const urlParams = new URLSearchParams(window.location.search);
-            const previewRole = urlParams.get('preview');
-            const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-            const isPreview = (isLocalhost || window.location.hostname.endsWith('vercel.app') || window.location.hostname === 'stocksense-psi.vercel.app') && previewRole;
-
             try {
-                if (isPreview) {
+                if (isPreviewMode()) {
+                    // Dev preview (localhost only): simulate against the mock list, never the backend.
                     markUserAsDeleted(userId);
                     state.adminUsers = state.adminUsers.filter(u => u.id !== userId);
                     state.adminTotalUsers = Math.max(0, state.adminTotalUsers - 1);
                     try {
                         localStorage.setItem('stocksense_mock_admin_users', JSON.stringify(state.adminUsers));
                     } catch {}
-                    if (state.adminAuditLogs) {
-                        state.adminAuditLogs.unshift({
-                            id: 'mock-audit-' + Date.now(),
-                            actor_email: state.currentUser ? state.currentUser.email : 'admin@stocksense.io',
-                            action: 'USER_DELETED',
-                            target_type: 'user',
-                            target_id: userId,
-                            details: { email: user.email, name: user.full_name },
-                            created_at: new Date().toISOString()
-                        });
-                    }
                     closeModal();
-                    notify(`User "${displayName}" was permanently deleted.`, 'success');
+                    notify(`Preview only: "${displayName}" was removed from the simulated list (no real account was deleted).`, 'info');
                     renderAdminUsersTable();
                     return;
                 }
 
-                // 2. Invoke server-side cascading deletion RPC with administrator authorization
+                // 2. Trusted server-side deletion: re-checks the caller's role, protects the Owner,
+                //    removes dependent rows and the Supabase Auth account in ONE transaction.
                 const { data, error } = await supabase.rpc('admin_delete_user', {
                     p_target_user_id: userId
                 });
 
-                if (error) {
-                    throw new Error(error.message || 'Database error occurred during user deletion.');
-                }
+                if (error) throw error;
 
-                if (!data || !data.success) {
-                    throw new Error(data?.error || 'Database rejected user deletion request.');
+                // 3. Only a server-verified deletion counts as success.
+                if (!data || data.success !== true || data.deleted_user_id !== userId) {
+                    throw new Error('The server did not confirm the deletion.');
                 }
-
-                // 3. Deletion verified on backend: update persistent state and DOM
-                markUserAsDeleted(userId);
-                state.adminUsers = (state.adminUsers || []).filter(u => u.id !== userId);
-                state.adminTotalUsers = Math.max(0, state.adminTotalUsers - 1);
 
                 closeModal();
-                notify(`User "${displayName}" was permanently deleted.`, 'success');
-                await loadAdminUsers();
+
+                // Reload overview counts and the user list from the database, then re-check.
+                await loadAdminData();
+                const stillListed = (state.adminUsers || []).some(u => u.id === userId);
+                if (stillListed) {
+                    notify('The server reported the deletion, but the account is still listed. Please refresh and verify before retrying.', 'error');
+                } else {
+                    notify(`User "${displayName}" was permanently deleted.`, 'success');
+                }
             } catch (err) {
-                // 4. On failure: restore buttons, preserve user record, and provide diagnostic feedback
-                submitBtn.disabled = false;
+                // 4. On failure nothing was removed: keep the row, restore the controls, explain why.
+                submitBtn.disabled = confirmInput.value.trim() !== 'DELETE';
                 submitBtn.textContent = 'Permanently Delete User';
                 if (cancelBtn) cancelBtn.disabled = false;
                 confirmInput.disabled = false;
 
+                const msg = friendlyAdminError(err, 'The account could not be deleted. No changes were made.');
                 if (errBox) {
-                    errBox.textContent = `Deletion error: ${err.message || 'Failed to delete user.'}`;
+                    errBox.textContent = `Deletion failed: ${msg}`;
                     errBox.style.display = 'block';
                 }
-                notify(err.message || 'Failed to delete user account.', 'error');
+                notify(msg, 'error');
             }
         };
     }
@@ -2867,10 +2932,14 @@
         }
     }
 
+    // Pages that already render their own main heading inside the page content.
+    // The shared top bar must not repeat that heading (or its primary action).
+    const OWN_HEADING_PAGES = new Set(['inventory', 'movements']);
+
     const pageHeaders = {
         dashboard: ['', "Here's your business at a glance."],
-        inventory: ['Product Inventory', 'Manage your catalog, products, prices, and stock.'],
-        movements: ['Stock Movements', 'Track sales, restocking, and inventory adjustments.'],
+        inventory: ['', ''],
+        movements: ['', ''],
         advisor: ['StockSense Adviser', 'Get practical guidance for managing your stock.'],
         reports: ['Reports', 'Understand your inventory performance.'],
         admin: ['Platform Administration', 'Platform overview, user accounts, security roles and audit logs.'],
@@ -2926,18 +2995,19 @@
             if ($('subtitle')) $('subtitle').textContent = pageHeaders[pageId][1];
         }
 
+        // Pages with their own in-page heading: render no second heading in the shared top bar.
+        const ownsHeading = OWN_HEADING_PAGES.has(pageId);
+        const topBar = $('page-top');
+        const topHeading = $('top-heading-text');
+        if (topBar) topBar.classList.toggle('top-compact', ownsHeading);
+        if (topHeading) topHeading.hidden = ownsHeading;
+
         if (pageId === 'assistance') {
             const hasWhatsapp = !!(state.platformSettings.support_whatsapp || window.STOCKSENSE_WHATSAPP);
             const noWaEl = $('assistance-no-whatsapp');
             if (noWaEl) noWaEl.style.display = hasWhatsapp ? 'none' : 'block';
             const detailPanel = $('assistance-detail-panel');
             if (detailPanel) detailPanel.style.display = 'none';
-        }
-
-        // Add Product button belongs ONLY on Product Inventory
-        const addBtn = $('add');
-        if (addBtn) {
-            addBtn.style.display = (pageId === 'inventory') ? '' : 'none';
         }
 
         $('sidebar')?.classList.remove('open');
@@ -3112,102 +3182,206 @@
     }
 
     // -------------------------------------------------------------------------
-    // Progressive Web App (PWA) State Machine & 5-Minute Reminder
+    // -------------------------------------------------------------------------
+    // Progressive Web App (PWA) Install Prompt & 5-Minute Reminder
+    //
+    // Rules:
+    //  - The prompt is eligible ONLY while a real authenticated session is active
+    //    (never on login, signup, check-email, verification, password reset or loading screens).
+    //  - It is shown at most once per eligibility window; route changes never re-trigger it.
+    //  - If the user dismisses/cancels it, it is offered again after 5 minutes until installed.
+    //  - Exactly ONE reminder timer exists at any time (every scheduler clears the previous one),
+    //    and nothing is shown while the tab is in the background.
+    //  - "Installed" is only recorded from the browser's `appinstalled` event or detected live from
+    //    standalone display mode; accepting the native dialog alone is not treated as installed.
     // -------------------------------------------------------------------------
     const PWA_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-    let deferredPwaPrompt = null;
-    let pwaReminderTimer = null;
+    const PWA_FIRST_PROMPT_DELAY_MS = 2500;
+    const PWA_BUSY_RETRY_MS = 25000;
+    let deferredPwaPrompt = null;      // native `beforeinstallprompt` event (Chromium-based browsers)
+    let pwaReminderTimer = null;       // the single reminder timer
+    let pwaPromptEligible = false;     // true only after successful authentication
+    let pwaVisibilityBound = false;
 
-    function isAppInstalled() {
+    function readPwaStorage(key) {
+        try { return localStorage.getItem(key); } catch { return null; }
+    }
+
+    function writePwaStorage(key, value) {
+        try {
+            if (value === null) localStorage.removeItem(key);
+            else localStorage.setItem(key, value);
+        } catch {}
+    }
+
+    function isRunningStandalone() {
         if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
         if (window.navigator && window.navigator.standalone === true) return true;
         if (document.referrer && document.referrer.startsWith('android-app://')) return true;
-        if (localStorage.getItem('stocksense_pwa_installed') === 'true') return true;
         return false;
     }
 
-    function shouldShowPwaPrompt() {
+    function isAppInstalled() {
+        if (isRunningStandalone()) return true;
+        return readPwaStorage('stocksense_pwa_installed') === 'true';
+    }
+
+    function isIosDevice() {
+        const ua = navigator.userAgent || '';
+        const classicIos = /iphone|ipad|ipod/i.test(ua) && !window.MSStream;
+        const modernIpad = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1; // iPadOS 13+
+        return classicIos || modernIpad;
+    }
+
+    /** True when the browser can actually install the app: native prompt captured, or iOS manual flow. */
+    function isPwaInstallPossible() {
+        return !!deferredPwaPrompt || isIosDevice();
+    }
+
+    function canOfferPwaPrompt() {
+        if (!pwaPromptEligible) return false;                 // not authenticated (or signing out)
+        if (!state.currentUser) return false;                 // auth unresolved / signed out
+        if (isSigningOutDueToTimeout) return false;
+        const appRoot = $('app-root');
+        if (!appRoot || appRoot.style.display === 'none') return false;
         if (isAppInstalled()) return false;
-        const dismissedAt = Number(localStorage.getItem('stocksense_pwa_dismissed_at') || 0);
-        if (!dismissedAt) return true;
-        return (Date.now() - dismissedAt) >= PWA_INTERVAL_MS;
+        return isPwaInstallPossible();
     }
 
-    function scheduleNextPwaPrompt() {
-        if (isAppInstalled()) return;
-        if (pwaReminderTimer) clearTimeout(pwaReminderTimer);
-
-        const dismissedAt = Number(localStorage.getItem('stocksense_pwa_dismissed_at') || 0);
-        const elapsed = Date.now() - dismissedAt;
-        const remaining = Math.max(0, PWA_INTERVAL_MS - elapsed);
-
-        pwaReminderTimer = setTimeout(() => {
-            showPwaPromptIfEligible();
-        }, remaining);
-    }
-
-    function showPwaPromptIfEligible() {
-        if (isAppInstalled()) return;
-        if (!shouldShowPwaPrompt()) {
-            scheduleNextPwaPrompt();
-            return;
-        }
-
-        // Defer prompt if active modal dialog is open
-        const modalEl = $('modal');
-        if (modalEl && modalEl.children.length > 0) {
-            if (pwaReminderTimer) clearTimeout(pwaReminderTimer);
-            pwaReminderTimer = setTimeout(showPwaPromptIfEligible, 25000);
-            return;
-        }
-
-        const banner = $('pwa-install-banner');
-        if (banner) {
-            banner.style.display = 'flex';
-        }
-    }
-
-    function dismissPwaPrompt() {
-        localStorage.setItem('stocksense_pwa_dismissed_at', Date.now().toString());
-        const banner = $('pwa-install-banner');
-        if (banner) banner.style.display = 'none';
-        const iosModal = $('modal-pwa-instructions');
-        if (iosModal) iosModal.style.display = 'none';
-        scheduleNextPwaPrompt();
-    }
-
-    function markPwaInstalled() {
-        localStorage.setItem('stocksense_pwa_installed', 'true');
-        const banner = $('pwa-install-banner');
-        if (banner) banner.style.display = 'none';
-        const iosModal = $('modal-pwa-instructions');
-        if (iosModal) iosModal.style.display = 'none';
+    function clearPwaTimer() {
         if (pwaReminderTimer) {
             clearTimeout(pwaReminderTimer);
             pwaReminderTimer = null;
         }
     }
 
+    function isPwaBannerVisible() {
+        const banner = $('pwa-install-banner');
+        return !!banner && banner.style.display !== 'none';
+    }
+
+    function hidePwaUi() {
+        const banner = $('pwa-install-banner');
+        if (banner) banner.style.display = 'none';
+        const iosModal = $('modal-pwa-instructions');
+        if (iosModal) iosModal.style.display = 'none';
+    }
+
+    function pwaReminderDelay() {
+        const dismissedAt = Number(readPwaStorage('stocksense_pwa_dismissed_at') || 0);
+        if (!dismissedAt) return PWA_FIRST_PROMPT_DELAY_MS;
+        return Math.max(0, PWA_INTERVAL_MS - (Date.now() - dismissedAt));
+    }
+
+    function shouldShowPwaPrompt() {
+        if (!canOfferPwaPrompt()) return false;
+        const dismissedAt = Number(readPwaStorage('stocksense_pwa_dismissed_at') || 0);
+        if (!dismissedAt) return true;
+        return (Date.now() - dismissedAt) >= PWA_INTERVAL_MS;
+    }
+
+    /** (Re)schedules the one and only reminder timer. Safe to call repeatedly. */
+    function scheduleNextPwaPrompt() {
+        clearPwaTimer();
+        if (!canOfferPwaPrompt()) return;
+        if (isPwaBannerVisible()) return; // already on screen; the next reminder starts at dismissal
+        pwaReminderTimer = setTimeout(() => {
+            pwaReminderTimer = null;
+            showPwaPromptIfEligible();
+        }, pwaReminderDelay());
+    }
+
+    function showPwaPromptIfEligible() {
+        if (!canOfferPwaPrompt()) {
+            clearPwaTimer();
+            hidePwaUi();
+            return;
+        }
+        if (!shouldShowPwaPrompt()) {
+            scheduleNextPwaPrompt();
+            return;
+        }
+        // Never show while the tab is in the background; the visibilitychange handler re-evaluates.
+        if (document.visibilityState !== 'visible') return;
+        if (isPwaBannerVisible()) return;
+
+        // Defer while another dialog is open
+        const modalEl = $('modal');
+        if (modalEl && modalEl.children.length > 0) {
+            clearPwaTimer();
+            pwaReminderTimer = setTimeout(() => {
+                pwaReminderTimer = null;
+                showPwaPromptIfEligible();
+            }, PWA_BUSY_RETRY_MS);
+            return;
+        }
+
+        const banner = $('pwa-install-banner');
+        if (banner) banner.style.display = 'flex';
+    }
+
+    /** Called once a real session is fully established (app shell visible). */
+    function activatePwaPromptForSession() {
+        pwaPromptEligible = true;
+        if (!pwaVisibilityBound) {
+            pwaVisibilityBound = true;
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && canOfferPwaPrompt() && !isPwaBannerVisible() && !pwaReminderTimer) {
+                    scheduleNextPwaPrompt();
+                }
+            });
+        }
+        // Idempotent: do not restart a pending timer or hide a banner that is already showing.
+        if (pwaReminderTimer || isPwaBannerVisible()) return;
+        scheduleNextPwaPrompt();
+    }
+
+    /** Called whenever an unauthenticated/transitional screen is displayed, and on sign-out. */
+    function deactivatePwaPromptForSession() {
+        pwaPromptEligible = false;
+        clearPwaTimer();
+        hidePwaUi();
+    }
+
+    function dismissPwaPrompt() {
+        writePwaStorage('stocksense_pwa_dismissed_at', Date.now().toString());
+        hidePwaUi();
+        scheduleNextPwaPrompt();
+    }
+
+    function markPwaInstalled() {
+        writePwaStorage('stocksense_pwa_installed', 'true');
+        deferredPwaPrompt = null;
+        clearPwaTimer();
+        hidePwaUi();
+    }
+
     async function handlePwaInstallClick() {
         if (deferredPwaPrompt) {
-            deferredPwaPrompt.prompt();
-            const { outcome } = await deferredPwaPrompt.userChoice;
-            if (outcome === 'accepted') {
-                markPwaInstalled();
-            } else {
+            const nativePrompt = deferredPwaPrompt;
+            deferredPwaPrompt = null; // a captured prompt can only be used once
+            const banner = $('pwa-install-banner');
+            if (banner) banner.style.display = 'none';
+            try {
+                nativePrompt.prompt();
+                const { outcome } = await nativePrompt.userChoice;
+                if (outcome === 'accepted') {
+                    // Wait for the browser's `appinstalled` event before recording anything as installed.
+                    clearPwaTimer();
+                } else {
+                    dismissPwaPrompt();
+                }
+            } catch (err) {
+                console.warn('[PWA] Install prompt failed:', err);
                 dismissPwaPrompt();
             }
-            deferredPwaPrompt = null;
+        } else if (isIosDevice()) {
+            const banner = $('pwa-install-banner');
+            if (banner) banner.style.display = 'none';
+            $('modal-pwa-instructions').style.display = 'flex';
         } else {
-            const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
-            if (isIOS) {
-                const banner = $('pwa-install-banner');
-                if (banner) banner.style.display = 'none';
-                $('modal-pwa-instructions').style.display = 'flex';
-            } else {
-                notify('To install StockSense, click the install icon in your browser address bar or choose "Install" from the menu (⋮).', 'info');
-                dismissPwaPrompt();
-            }
+            notify('To install StockSense, click the install icon in your browser address bar or choose "Install" from the menu (⋮).', 'info');
+            dismissPwaPrompt();
         }
     }
 
@@ -3219,30 +3393,38 @@
             });
         }
 
-        if (isAppInstalled()) {
-            markPwaInstalled();
-            return;
-        }
-
-        // Capture native browser installation prompt
+        // Capture the native prompt as early as possible (it may fire before sign-in), but only
+        // surface it to the user once authentication has succeeded.
         window.addEventListener('beforeinstallprompt', e => {
             e.preventDefault();
             deferredPwaPrompt = e;
-            showPwaPromptIfEligible();
+            // The browser only fires this when the app is NOT installed, so clear any stale flag
+            // left behind by a previous installation that has since been removed.
+            writePwaStorage('stocksense_pwa_installed', null);
+            if (pwaPromptEligible) scheduleNextPwaPrompt();
         });
 
         window.addEventListener('appinstalled', () => {
             markPwaInstalled();
         });
 
-        // Evaluate on load or schedule reminder
-        if (shouldShowPwaPrompt()) {
-            setTimeout(showPwaPromptIfEligible, 2500);
-        } else {
-            scheduleNextPwaPrompt();
+        // Leaving/entering standalone mode (e.g. after installing) updates the UI live.
+        if (window.matchMedia) {
+            const standaloneQuery = window.matchMedia('(display-mode: standalone)');
+            const onDisplayModeChange = () => {
+                if (standaloneQuery.matches) {
+                    clearPwaTimer();
+                    hidePwaUi();
+                }
+            };
+            if (standaloneQuery.addEventListener) standaloneQuery.addEventListener('change', onDisplayModeChange);
         }
-    }
 
+        if (isRunningStandalone()) {
+            hidePwaUi();
+        }
+        // No prompt is evaluated here: eligibility starts only after authentication succeeds.
+    }
     // -------------------------------------------------------------------------
     // Customer-Facing Inventory Setup Assistance
     // -------------------------------------------------------------------------
@@ -4026,6 +4208,15 @@
             if (act === 'delete-user') openDeleteUserModal(uid);
             return;
         }
+
+        const adminPageBtn = e.target.closest('[data-admin-page]');
+        if (adminPageBtn && !adminPageBtn.disabled) {
+            const dir = adminPageBtn.dataset.adminPage;
+            const step = state.adminUserLimit;
+            state.adminUserOffset = dir === 'next' ? state.adminUserOffset + step : Math.max(0, state.adminUserOffset - step);
+            loadAdminUsers();
+            return;
+        }
     });
 
     // File input and drag & drop for bulk upload
@@ -4073,7 +4264,7 @@
     });
 
     // Top action buttons
-    $('add').onclick = $('add2').onclick = () => openProductModal();
+    $('add2').onclick = () => openProductModal();
     $('export').onclick = exportMovementsCSV;
     $('exportInventory').onclick = exportInventoryCSV;
 

@@ -106,17 +106,16 @@
 
         <!-- Main Workspace Area -->
         <main>
-            <header class="top">
+            <header class="top" id="page-top">
                 <div class="top-title-group">
                     <button class="btn secondary mobile btn-menu" id="menu" aria-label="Open navigation menu">☰</button>
-                    <div class="top-heading-text">
+                    <div class="top-heading-text" id="top-heading-text">
                         <h1 class="h1" id="title">Dashboard</h1>
                         <p class="muted" id="subtitle">Here's your business at a glance.</p>
                     </div>
                 </div>
                 <div class="top-actions">
                     <span class="desktop muted" id="date"></span>
-                    <button class="btn primary" id="add" style="display:none">＋ Add product</button>
                 </div>
             </header>
 
@@ -421,12 +420,6 @@
 
             <!-- Page 6: Dedicated Inventory Setup Assistance Page -->
             <section class="page" id="page-assistance">
-                <div class="panel assistance-hero-panel">
-                    <div class="eyebrow" style="color:var(--green)">DEDICATED ONBOARDING & SUPPORT</div>
-                    <h2>How Can We Help You?</h2>
-                    <p class="sub">Choose the kind of assistance you need. Our team will guide you through the next steps.</p>
-                </div>
-
                 <!-- Setup notice if WhatsApp contact is unconfigured -->
                 <div id="assistance-no-whatsapp" class="auth-notice error" style="display:none;margin-bottom:18px">
                     <b>⚠️ Support WhatsApp Not Configured:</b> A StockSense business WhatsApp contact number has not been set yet. Platform Administrators can configure it under <b>Admin Portal → Platform Settings</b>.
@@ -484,10 +477,6 @@
 
             <!-- Page 7: Dedicated Platform Administration Dashboard -->
             <section class="page" id="page-admin">
-                <div class="admin-badge-header">
-                    <span>🛡 Platform Administration</span>
-                </div>
-
                 <div class="admin-nav-tabs">
                     <button class="admin-nav-tab active" data-admin-tab="overview">Overview</button>
                     <button class="admin-nav-tab" data-admin-tab="users">User Management</button>
@@ -553,22 +542,30 @@
 
                         <div class="toolbar">
                             <input class="field search" id="admin-user-search" placeholder="Search by name, email, or UUID…">
-                            <select id="admin-user-role-filter" class="field">
-                                <option value="all">All roles</option>
-                                <option value="owner">Owner</option>
-                                <option value="admin">Administrator</option>
-                                <option value="moderator">Moderator</option>
-                                <option value="none">Standard Member</option>
-                            </select>
-                            <select id="admin-user-status-filter" class="field">
-                                <option value="all">All statuses</option>
-                                <option value="active">Active accounts</option>
-                                <option value="suspended">Suspended accounts</option>
-                            </select>
+                            <div class="filter-pair" role="group" aria-label="User filters">
+                                <label class="filter-field" for="admin-user-status-filter">
+                                    <span class="filter-label">Status</span>
+                                    <select id="admin-user-status-filter" class="field">
+                                        <option value="all">All statuses</option>
+                                        <option value="active">Active</option>
+                                        <option value="suspended">Suspended</option>
+                                    </select>
+                                </label>
+                                <label class="filter-field" for="admin-user-role-filter">
+                                    <span class="filter-label">Role</span>
+                                    <select id="admin-user-role-filter" class="field">
+                                        <option value="all">All roles</option>
+                                        <option value="owner">Owner</option>
+                                        <option value="admin">Administrator</option>
+                                        <option value="moderator">Moderator</option>
+                                        <option value="none">Member</option>
+                                    </select>
+                                </label>
+                            </div>
                         </div>
 
-                        <div class="tablewrap">
-                            <table>
+                        <div class="tablewrap admin-users-wrap">
+                            <table class="admin-users-table">
                                 <thead>
                                     <tr>
                                         <th>Name & User ID</th>
@@ -586,6 +583,7 @@
 
                         <div class="pagination-bar">
                             <span id="admin-users-pagination-info">Showing users</span>
+                            <div class="pagination-controls" id="admin-users-pagination-controls"></div>
                         </div>
                     </div>
                 </div>
